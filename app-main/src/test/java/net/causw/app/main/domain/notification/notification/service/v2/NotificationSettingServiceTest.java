@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.doThrow;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.mock;
 import static org.mockito.BDDMockito.never;
 import static org.mockito.BDDMockito.verify;
+import static org.mockito.BDDMockito.verifyNoInteractions;
 
 import java.util.EnumMap;
 import java.util.List;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -240,6 +243,66 @@ class NotificationSettingServiceTest {
 				.hasFieldOrPropertyWithValue("errorCode", BoardConfigErrorCode.BOARD_NOT_NOTICE);
 
 			verify(notificationSettingWriter, never()).upsertBoardSubscribe(any(), any(), anyBoolean());
+		}
+	}
+
+	@Nested
+	@DisplayName("개인 알림 설정 기본값 복원 (resetUserSettingsToDefault)")
+	class ResetUserSettingsTest {
+
+		private final String userId = "user-001";
+
+		@Test
+		@DisplayName("성공: 저장된 커스텀 설정과 무관하게 모든 키가 기본값으로 upsert된다 (커스텀 설정 덮어쓰기)")
+		void givenStoredCustomSettings_whenReset_thenUpsertAllKeysWithDefaults() {
+			// given
+			User mockUser = mock(User.class);
+			given(userReader.findUserByIdNotDeleted(userId)).willReturn(mockUser);
+
+			// when
+			notificationSettingService.resetUserSettingsToDefault(userId);
+
+			// then: 모든 enum 키가 defaultEnabled 값으로 채워진 맵으로 upsert가 호출된다
+			ArgumentCaptor<UserNotificationSettingMap> captor = ArgumentCaptor
+				.forClass(UserNotificationSettingMap.class);
+			verify(notificationSettingWriter).upsertSettings(eq(userId), captor.capture());
+
+			UserNotificationSettingMap captured = captor.getValue();
+			for (UserNotificationSettingKey key : UserNotificationSettingKey.values()) {
+				assertThat(captured.get(key)).isEqualTo(key.isDefaultEnabled());
+			}
+		}
+
+		@Test
+		@DisplayName("성공: 공식계정 게시판 구독 상태는 조회/변경되지 않는다")
+		void givenResetRequest_whenReset_thenOfficialBoardSubscriptionUntouched() {
+			// given
+			User mockUser = mock(User.class);
+			given(userReader.findUserByIdNotDeleted(userId)).willReturn(mockUser);
+
+			// when
+			notificationSettingService.resetUserSettingsToDefault(userId);
+
+			// then: 게시판 구독 관련 reader/writer는 전혀 호출되지 않는다
+			verify(notificationSettingWriter, never()).upsertBoardSubscribe(any(), any(), anyBoolean());
+			verifyNoInteractions(boardReader);
+			verifyNoInteractions(userBoardSubscribeReader);
+		}
+
+		@Test
+		@DisplayName("실패: 존재하지 않는 userId이면 원 비즈니스 예외가 전파되고 upsert가 호출되지 않는다")
+		void givenInvalidUserId_whenReset_thenThrowUserNotFoundExceptionAndNoUpsert() {
+			// given
+			String invalidUserId = "non-existent";
+			given(userReader.findUserByIdNotDeleted(invalidUserId))
+				.willThrow(UserErrorCode.USER_NOT_FOUND.toBaseException());
+
+			// when & then
+			assertThatThrownBy(() -> notificationSettingService.resetUserSettingsToDefault(invalidUserId))
+				.isInstanceOf(BaseRunTimeV2Exception.class)
+				.hasFieldOrPropertyWithValue("errorCode", UserErrorCode.USER_NOT_FOUND);
+
+			verify(notificationSettingWriter, never()).upsertSettings(any(), any());
 		}
 	}
 }

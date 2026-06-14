@@ -42,6 +42,14 @@ public class UserNotificationSettingMap {
 	}
 
 	/**
+	 * 모든 키를 enum의 defaultEnabled로 채운 기본 설정 맵을 생성한다.
+	 * 개인별 고정 토글을 일괄 기본값으로 복원할 때 사용한다.
+	 */
+	public static UserNotificationSettingMap ofDefaults() {
+		return ofFull(Map.of());
+	}
+
+	/**
 	 *
 	 * @param key 조회 설정 key
 	 * @return 조회 설정 on off (유저가 따로 설정하지 않았을 시, 기본 value 반환)

@@ -78,6 +78,17 @@ public class NotificationSettingService {
 	}
 
 	/**
+	 * 개인별 고정 토글을 모두 enum의 기본값으로 복원한다 (일괄 초기화).
+	 * <br> 공식계정 게시판 구독 상태는 변경하지 않는다.
+	 * @param userId 복원 대상 유저의 ID (존재하지 않으면 원 비즈니스 예외를 그대로 전파한다)
+	 */
+	@Transactional
+	public void resetUserSettingsToDefault(String userId) {
+		userReader.findUserByIdNotDeleted(userId);
+		notificationSettingWriter.upsertSettings(userId, UserNotificationSettingMap.ofDefaults());
+	}
+
+	/**
 	 * 공식계정 게시판 구독 상태를 upsert한다.
 	 * boardId가 is_notice=true인 게시판인지 검증한다.
 	 */
