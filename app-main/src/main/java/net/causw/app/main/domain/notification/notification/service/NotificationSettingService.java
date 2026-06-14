@@ -78,6 +78,17 @@ public class NotificationSettingService {
 	}
 
 	/**
+	 * 개인별 고정 토글을 모두 enum의 defaultEnabled 값으로 초기화한다.
+	 * 공식계정 게시판 구독 상태는 변경하지 않는다.
+	 */
+	@Transactional
+	public void resetToDefaultSettings(String userId) {
+		User user = userReader.findUserByIdNotDeleted(userId);
+		userValidator.validateUser(user);
+		notificationSettingWriter.resetToDefaults(userId);
+	}
+
+	/**
 	 * 공식계정 게시판 구독 상태를 upsert한다.
 	 * boardId가 is_notice=true인 게시판인지 검증한다.
 	 */

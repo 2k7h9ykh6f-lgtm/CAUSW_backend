@@ -242,4 +242,74 @@ class NotificationSettingServiceTest {
 			verify(notificationSettingWriter, never()).upsertBoardSubscribe(any(), any(), anyBoolean());
 		}
 	}
+
+	@Nested
+	@DisplayName("알림 설정 기본값 복원 (resetToDefaultSettings)")
+	class ResetToDefaultSettingsTest {
+
+		private final String userId = "user-001";
+
+		@Test
+		@DisplayName("성공: 기존 커스텀 설정이 기본값으로 덮어쓰여진다")
+		void givenCustomSettings_whenResetToDefaultSettings_thenOverwrittenWithDefaults() {
+			// given
+			User mockUser = mock(User.class);
+			given(userReader.findUserByIdNotDeleted(userId)).willReturn(mockUser);
+
+			// when
+			notificationSettingService.resetToDefaultSettings(userId);
+
+			// then
+			verify(notificationSettingWriter).resetToDefaults(userId);
+		}
+
+		@Test
+		@DisplayName("성공: 공식 게시판 구독 관련 로직은 호출되지 않는다")
+		void givenValidUser_whenResetToDefaultSettings_thenBoardSubscriptionNotAffected() {
+			// given
+			User mockUser = mock(User.class);
+			given(userReader.findUserByIdNotDeleted(userId)).willReturn(mockUser);
+
+			// when
+			notificationSettingService.resetToDefaultSettings(userId);
+
+			// then
+			verify(notificationSettingWriter, never()).upsertBoardSubscribe(any(), any(), anyBoolean());
+			verify(boardReader, never()).findAccessibleNoticeBoards(any());
+			verify(userBoardSubscribeReader, never()).findSubscribedBoardIds(any(), any());
+		}
+
+		@Test
+		@DisplayName("실패: 존재하지 않는 userId이면 예외 발생")
+		void givenInvalidUserId_whenResetToDefaultSettings_thenThrowUserNotFoundException() {
+			// given
+			String invalidUserId = "non-existent";
+			given(userReader.findUserByIdNotDeleted(invalidUserId))
+				.willThrow(UserErrorCode.USER_NOT_FOUND.toBaseException());
+
+			// when & then
+			assertThatThrownBy(() -> notificationSettingService.resetToDefaultSettings(invalidUserId))
+				.isInstanceOf(BaseRunTimeV2Exception.class)
+				.hasFieldOrPropertyWithValue("errorCode", UserErrorCode.USER_NOT_FOUND);
+
+			verify(notificationSettingWriter, never()).resetToDefaults(any());
+		}
+
+		@Test
+		@DisplayName("실패: 추방된 유저이면 예외 발생")
+		void givenBlockedUser_whenResetToDefaultSettings_thenThrowBlockedUserException() {
+			// given
+			User mockUser = mock(User.class);
+			given(userReader.findUserByIdNotDeleted(userId)).willReturn(mockUser);
+			doThrow(AuthErrorCode.DROPPED_USER.toBaseException())
+				.when(userValidator).validateUser(any(User.class));
+
+			// when & then
+			assertThatThrownBy(() -> notificationSettingService.resetToDefaultSettings(userId))
+				.isInstanceOf(BaseRunTimeV2Exception.class)
+				.hasFieldOrPropertyWithValue("errorCode", AuthErrorCode.DROPPED_USER);
+
+			verify(notificationSettingWriter, never()).resetToDefaults(any());
+		}
+	}
 }

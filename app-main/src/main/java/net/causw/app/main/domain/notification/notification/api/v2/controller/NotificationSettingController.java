@@ -4,6 +4,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -60,6 +61,16 @@ public class NotificationSettingController {
 
 		notificationSettingService.updateOfficialBoardSubscribe(
 			userDetails.getUserId(), boardId, request.subscribed());
+		return ApiResponse.success();
+	}
+
+	@PostMapping("/reset-defaults")
+	@Operation(summary = "알림 설정 기본값 복원", description = "개인별 고정 토글(커뮤니티/경조사/서비스 공지)을 서버 기본값으로 일괄 초기화합니다. "
+		+ "공식계정 게시판 구독 상태는 변경되지 않습니다.")
+	public ApiResponse<Void> resetToDefaultSettings(
+		@AuthenticationPrincipal CustomUserDetails userDetails) {
+
+		notificationSettingService.resetToDefaultSettings(userDetails.getUserId());
 		return ApiResponse.success();
 	}
 }

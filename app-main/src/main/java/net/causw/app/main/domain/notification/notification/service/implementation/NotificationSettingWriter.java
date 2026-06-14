@@ -53,6 +53,32 @@ public class NotificationSettingWriter {
 	}
 
 	/**
+	 * 모든 개인 고정 토글을 enum의 defaultEnabled 값으로 초기화한다.
+	 * 기존 row가 있으면 enabled 값을 기본값으로 업데이트하고, 없으면 기본값으로 새로 생성한다.
+	 * 공식 게시판 구독 상태는 건드리지 않는다.
+	 */
+	public void resetToDefaults(String userId) {
+		Map<UserNotificationSettingKey, UserNotificationSetting> storedMap = notificationSettingReader
+			.findAllByUserId(userId)
+			.stream()
+			.collect(Collectors.toMap(
+				UserNotificationSetting::getSettingKey,
+				Function.identity()));
+
+		for (UserNotificationSettingKey key : UserNotificationSettingKey.values()) {
+			boolean defaultValue = key.isDefaultEnabled();
+			UserNotificationSetting existing = storedMap.get(key);
+
+			if (existing == null) {
+				userNotificationSettingRepository.save(
+					UserNotificationSetting.of(userId, key, defaultValue));
+			} else {
+				existing.updateEnabled(defaultValue);
+			}
+		}
+	}
+
+	/**
 	 * 공식 게시판 구독 상태를 upsert한다.
 	 */
 	public void upsertBoardSubscribe(User user, Board board, boolean subscribed) {
