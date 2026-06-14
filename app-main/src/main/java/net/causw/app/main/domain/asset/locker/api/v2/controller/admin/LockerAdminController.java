@@ -16,10 +16,12 @@ import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.reques
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.request.LockerExtendRequest;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.request.LockerListRequest;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.request.LockerLogListRequest;
+import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.response.LockerExpiredReleaseResponse;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.response.LockerListItemResponse;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.response.LockerLogListItemResponse;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.mapper.LockerListMapper;
 import net.causw.app.main.domain.asset.locker.service.v2.LockerAdminService;
+import net.causw.app.main.domain.asset.locker.service.v2.dto.result.LockerExpiredReleaseResult;
 import net.causw.app.main.domain.user.auth.userdetails.CustomUserDetails;
 import net.causw.app.main.shared.dto.ApiResponse;
 import net.causw.app.main.shared.dto.PageResponse;
@@ -77,12 +79,12 @@ public class LockerAdminController {
 	}
 
 	@PostMapping("/release-all-expired")
-	@Operation(summary = "만료된 사물함 일괄 회수", description = "만료된 사물함을 일괄 회수합니다.")
-	public ApiResponse<Void> releaseExpiredLocker(
+	@Operation(summary = "만료된 사물함 일괄 회수", description = "만료된 사물함을 일괄 회수하고 회수 결과 요약을 반환합니다.")
+	public ApiResponse<LockerExpiredReleaseResponse> releaseExpiredLocker(
 		@AuthenticationPrincipal CustomUserDetails userDetails) {
 
-		lockerAdminService.releaseExpiredLocker(userDetails.getUserId());
-		return ApiResponse.success();
+		LockerExpiredReleaseResult result = lockerAdminService.releaseExpiredLocker(userDetails.getUserId());
+		return ApiResponse.success(lockerListMapper.toReleaseResponse(result));
 	}
 
 	@PostMapping("/{id}/assign")

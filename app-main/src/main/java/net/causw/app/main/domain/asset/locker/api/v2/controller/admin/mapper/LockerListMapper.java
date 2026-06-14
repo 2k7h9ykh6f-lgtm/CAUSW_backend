@@ -5,12 +5,14 @@ import org.mapstruct.Mapping;
 
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.request.LockerListRequest;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.request.LockerLogListRequest;
+import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.response.LockerExpiredReleaseResponse;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.response.LockerListItemResponse;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.response.LockerLogListItemResponse;
 import net.causw.app.main.domain.asset.locker.entity.Locker;
 import net.causw.app.main.domain.asset.locker.entity.LockerLog;
 import net.causw.app.main.domain.asset.locker.service.v2.dto.LockerListCondition;
 import net.causw.app.main.domain.asset.locker.service.v2.dto.LockerLogListCondition;
+import net.causw.app.main.domain.asset.locker.service.v2.dto.result.LockerExpiredReleaseResult;
 
 @Mapper(componentModel = "spring")
 public interface LockerListMapper {
@@ -25,4 +27,9 @@ public interface LockerListMapper {
 	LockerLogListCondition toCondition(LockerLogListRequest request);
 
 	LockerLogListItemResponse toResponse(LockerLog lockerLog);
+
+	LockerExpiredReleaseResponse toReleaseResponse(LockerExpiredReleaseResult result);
+
+	LockerExpiredReleaseResponse.ReleasedLockerItem toReleasedItem(
+		LockerExpiredReleaseResult.ReleasedLockerResult result);
 }

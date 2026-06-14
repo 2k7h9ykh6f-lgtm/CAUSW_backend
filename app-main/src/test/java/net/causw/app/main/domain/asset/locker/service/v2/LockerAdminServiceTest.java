@@ -2,6 +2,7 @@ package net.causw.app.main.domain.asset.locker.service.v2;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -27,6 +28,7 @@ import net.causw.app.main.domain.asset.locker.entity.LockerLog;
 import net.causw.app.main.domain.asset.locker.entity.LockerName;
 import net.causw.app.main.domain.asset.locker.service.v2.dto.LockerListCondition;
 import net.causw.app.main.domain.asset.locker.service.v2.dto.LockerLogListCondition;
+import net.causw.app.main.domain.asset.locker.service.v2.dto.result.LockerExpiredReleaseResult;
 import net.causw.app.main.domain.asset.locker.service.v2.implementation.LockerLogReader;
 import net.causw.app.main.domain.asset.locker.service.v2.implementation.LockerReader;
 import net.causw.app.main.domain.asset.locker.service.v2.implementation.LockerValidator;
@@ -409,13 +411,45 @@ class LockerAdminServiceTest {
 				.thenReturn(List.of(locker1, locker2));
 
 			// when
-			lockerAdminService.releaseExpiredLocker(adminId);
+			LockerExpiredReleaseResult result = lockerAdminService.releaseExpiredLocker(adminId);
 
 			// then
 			verify(lockerReader).findExpiredLockers(any(LocalDateTime.class));
 
 			verify(lockerWriter).releaseLocker(locker1, admin, user1.getEmail(), user1.getName());
 			verify(lockerWriter).releaseLocker(locker2, admin, user2.getEmail(), user2.getName());
+
+			assertThat(result.releasedCount()).isEqualTo(2);
+			assertThat(result.released())
+				.extracting(
+					LockerExpiredReleaseResult.ReleasedLockerResult::lockerId,
+					LockerExpiredReleaseResult.ReleasedLockerResult::lockerNumber,
+					LockerExpiredReleaseResult.ReleasedLockerResult::location)
+				.containsExactlyInAnyOrder(
+					tuple("locker-1", 1L, location.getDescription()),
+					tuple("locker-2", 2L, location.getDescription()));
+		}
+
+		@Test
+		@DisplayName("성공: 만료된 사물함이 없으면 빈 결과를 반환하고 회수를 수행하지 않는다")
+		void givenNoExpiredLockers_whenReleaseExpiredLocker_thenReturnsEmptyResult() {
+			// given
+			String adminId = "admin-1";
+
+			User admin = createUser(adminId);
+
+			when(userReader.findAdminUserById(adminId)).thenReturn(admin);
+			when(lockerReader.findExpiredLockers(any(LocalDateTime.class)))
+				.thenReturn(List.of());
+
+			// when
+			LockerExpiredReleaseResult result = lockerAdminService.releaseExpiredLocker(adminId);
+
+			// then
+			assertThat(result.releasedCount()).isZero();
+			assertThat(result.released()).isEmpty();
+			verify(lockerWriter, never())
+				.releaseLocker(any(Locker.class), any(User.class), anyString(), anyString());
 		}
 	}
 }
