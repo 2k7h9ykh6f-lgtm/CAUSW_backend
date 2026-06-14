@@ -1,0 +1,54 @@
+package net.causw.app.main.domain.asset.locker.repository;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import net.causw.app.main.domain.asset.locker.entity.Locker;
+import net.causw.app.main.domain.asset.locker.repository.dto.LockerCountByLocation;
+
+import jakarta.persistence.LockModeType;
+
+@Repository
+public interface LockerRepository extends JpaRepository<Locker, String> {
+
+	@Query("SELECT l FROM Locker l WHERE l.id = :id")
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	Optional<Locker> findByIdForWrite(@Param("id") String id);
+
+	@Query("SELECT l FROM Locker l WHERE l.id = :id")
+	@Lock(LockModeType.PESSIMISTIC_READ)
+	Optional<Locker> findByIdForRead(@Param("id") String id);
+
+	Optional<Locker> findByLockerNumber(Long lockerNumber);
+
+	Optional<Locker> findByUser_Id(String userId);
+
+	List<Locker> findByLocation_IdOrderByLockerNumberAsc(String locationId);
+
+	@Query("SELECT l FROM Locker l LEFT JOIN FETCH l.user WHERE l.location.id = :locationId ORDER BY l.lockerNumber ASC")
+	List<Locker> findByLocationIdWithUser(@Param("locationId") String locationId);
+
+	long countByLocationIdAndIsActiveIsTrueAndUserIdIsNull(String locationId);
+
+	long countByLocationId(String locationId);
+
+	@Query("""
+		SELECT new net.causw.app.main.domain.asset.locker.repository.dto.LockerCountByLocation(
+		       l.location.id,
+		       COUNT(l),
+		       COUNT(CASE WHEN l.isActive = true AND l.user IS NULL THEN 1 END))
+		FROM Locker l
+		GROUP BY l.location.id
+		""")
+	List<LockerCountByLocation> countGroupByLocation();
+
+	List<Locker> findAllByExpireDateBeforeAndUserIsNotNull(LocalDateTime expireDate);
+
+}

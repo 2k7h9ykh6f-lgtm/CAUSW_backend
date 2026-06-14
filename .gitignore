@@ -1,0 +1,82 @@
+HELP.md
+.gradle
+.env*
+!.env.example
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+lib
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+dump.rdb
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+### mac OS ###
+.DS_Store
+.AppleDouble
+.LSOverride
+
+### Project security ###
+#**/resources/application.yml
+**/resources/email-config.yaml
+**/resources/password-config.yaml
+**/resources/causw-dev-51ab1a030da2.json
+#**/resources/application-dev.yml
+#**/resources/application-prod.yml
+#**/resources/application-local.yml
+**/resources/application-test.yml
+**/resources/application-qa.yml
+**/resources/application-seed.yml
+**/resources/dongnae_firebase_key.json
+
+Dockerfile
+docker-compose.yaml
+deploy_*.sh
+app-*.yaml
+log/
+
+*.pem
+/app-main/src/main/generated/net/causw/app/main/dto/util/*Impl.java
+/app-main/src/main/generated/net/causw/app/main/dto/util/dtoMapper/*Impl.java
+/app-main/src/main/generated/net/causw/app/main/dto/util/dtoMapper/custom/*Impl.java
+
+### Monitoring Data (Do not commit) ###
+monitoring/prometheus-data/
+monitoring/grafana-data/
+monitoring/loki-data/
+monitoring/mysqld-exporter/.my.cnf
+
+/.claude
+.bkit
+
+CLAUDE.md
+.github/copilot-instructions.md

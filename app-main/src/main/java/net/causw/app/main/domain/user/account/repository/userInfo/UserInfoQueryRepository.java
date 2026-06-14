@@ -1,0 +1,141 @@
+package net.causw.app.main.domain.user.account.repository.userInfo;
+
+import java.util.List;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.support.PageableExecutionUtils;
+import org.springframework.stereotype.Repository;
+
+import net.causw.app.main.domain.user.academic.enums.userAcademicRecord.AcademicStatus;
+import net.causw.app.main.domain.user.account.entity.user.QUser;
+import net.causw.app.main.domain.user.account.entity.userInfo.QUserCareer;
+import net.causw.app.main.domain.user.account.entity.userInfo.QUserInfo;
+import net.causw.app.main.domain.user.account.entity.userInfo.UserInfo;
+import net.causw.app.main.domain.user.account.enums.userinfo.SortType;
+import net.causw.app.main.domain.user.account.service.dto.request.UserInfoListCondition;
+import net.causw.app.main.shared.exception.errorcode.UserInfoErrorCode;
+
+import com.querydsl.core.types.OrderSpecifier;
+import com.querydsl.core.types.dsl.BooleanExpression;
+import com.querydsl.core.types.dsl.Expressions;
+import com.querydsl.jpa.JPAExpressions;
+import com.querydsl.jpa.impl.JPAQuery;
+import com.querydsl.jpa.impl.JPAQueryFactory;
+
+import lombok.RequiredArgsConstructor;
+
+@Repository
+@RequiredArgsConstructor
+public class UserInfoQueryRepository {
+
+	private final JPAQueryFactory jpaQueryFactory;
+
+	public Page<UserInfo> findAllWithFilter(UserInfoListCondition filter, Pageable pageable, String excludeUserId) {
+		QUserInfo userInfo = QUserInfo.userInfo;
+		QUser user = QUser.user;
+
+		BooleanExpression condition = baseCondition(filter, userInfo, excludeUserId);
+
+		List<UserInfo> content = jpaQueryFactory
+			.selectFrom(userInfo)
+			.join(userInfo.user, user).fetchJoin()
+			.where(condition)
+			.orderBy(getSortType(filter, userInfo))
+			.offset(pageable.getOffset())
+			.limit(pageable.getPageSize())
+			.fetch();
+
+		JPAQuery<Long> countQuery = jpaQueryFactory
+			.select(userInfo.count())
+			.from(userInfo)
+			.join(userInfo.user, user)
+			.where(condition);
+
+		return PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+	}
+
+	private BooleanExpression baseCondition(UserInfoListCondition filter, QUserInfo userInfo, String excludeUserId) {
+		BooleanExpression condition = Expressions.TRUE.isTrue();
+
+		// 본인 프로필 제외
+		if (excludeUserId != null) {
+			condition = condition.and(userInfo.user.id.ne(excludeUserId));
+		}
+		List<String> academicStatusList = filter.academicStatus();
+		Integer admissionYearStart = filter.admissionYearStart();
+		Integer admissionYearEnd = filter.admissionYearEnd();
+		String keyword = filter.keyword();
+
+		// 학적 상태 필터
+		if (academicStatusList == null || academicStatusList.isEmpty()) {
+			condition = condition
+				.and(userInfo.user.academicStatus.in(AcademicStatus.GRADUATED, AcademicStatus.ENROLLED));
+		} else {
+			List<AcademicStatus> academicStatuses = academicStatusList.stream()
+				.map(AcademicStatus::fromString)
+				.toList();
+			condition = condition.and(userInfo.user.academicStatus.in(academicStatuses));
+		}
+
+		// 학번 필터
+		if (!(admissionYearStart == null && admissionYearEnd == null)) {
+			if (admissionYearStart == null || admissionYearEnd == null) {
+				throw UserInfoErrorCode.INVALID_ADMISSION_YEAR_RANGE.toBaseException();
+			}
+			if (admissionYearStart > admissionYearEnd) {
+				throw UserInfoErrorCode.INVALID_ADMISSION_YEAR_RANGE.toBaseException();
+			}
+			condition = condition.and(userInfo.user.admissionYear.between(admissionYearStart, admissionYearEnd));
+		}
+
+		// 검색
+		QUserCareer userCareer = QUserCareer.userCareer;
+		if (keyword != null && !keyword.trim().isBlank()) {
+			BooleanExpression keywordCondition = Expressions.FALSE.isTrue();
+
+			keywordCondition = keywordCondition.or(userInfo.user.name.containsIgnoreCase(keyword));
+			keywordCondition = keywordCondition.or(userInfo.description.containsIgnoreCase(keyword));
+			keywordCondition = keywordCondition.or(JPAExpressions.selectFrom(userCareer)
+				.where(userCareer.userInfo.eq(userInfo)
+					.and(userCareer.description.containsIgnoreCase(keyword)))
+				.exists());
+			condition = condition.and(keywordCondition);
+		}
+
+		return condition;
+	}
+
+	// 정렬 필터
+	private OrderSpecifier<?>[] getSortType(UserInfoListCondition filter, QUserInfo userInfo) {
+		if (filter.sortType() == null || filter.sortType().isEmpty()) {
+			return new OrderSpecifier[] {
+				userInfo.updatedAt.desc(), userInfo.user.admissionYear.desc()
+			};
+		}
+		SortType sortType = SortType.fromString(filter.sortType());
+
+		switch (sortType) {
+			case ADMISSION_YEAR_DESC -> {
+				return new OrderSpecifier[] {
+					userInfo.user.admissionYear.desc(), userInfo.user.name.asc(), userInfo.updatedAt.desc()
+				};
+			}
+			case ADMISSION_YEAR_ASC -> {
+				return new OrderSpecifier[] {
+					userInfo.user.admissionYear.asc(), userInfo.user.name.asc(), userInfo.updatedAt.desc()
+				};
+			}
+			case UPDATED_AT_ASC -> {
+				return new OrderSpecifier[] {
+					userInfo.updatedAt.asc(), userInfo.user.admissionYear.desc()
+				};
+			}
+			default -> {
+				return new OrderSpecifier[] {
+					userInfo.updatedAt.desc(), userInfo.user.admissionYear.desc()
+				};
+			}
+		}
+	}
+}

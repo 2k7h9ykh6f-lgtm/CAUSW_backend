@@ -1,0 +1,29 @@
+package net.causw.app.main.domain.user.account.repository.user;
+
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import net.causw.app.main.domain.user.account.entity.user.SocialAccount;
+import net.causw.app.main.domain.user.account.entity.user.User;
+import net.causw.app.main.domain.user.account.enums.user.SocialType;
+
+@Repository
+public interface SocialAccountRepository extends JpaRepository<SocialAccount, String> {
+
+	@EntityGraph(attributePaths = {"user"})
+	Optional<SocialAccount> findBySocialIdAndSocialType(String socialId, SocialType socialType);
+
+	Optional<SocialAccount> findByUser_IdAndSocialType(String userId, SocialType socialType);
+
+	Boolean existsByUserAndSocialType(User user, SocialType socialType);
+
+	long countByUserId(String userId);
+
+	List<SocialAccount> findAllByUserId(String userId);
+
+	List<SocialAccount> findAllByUserIdIn(List<String> userIds);
+}

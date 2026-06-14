@@ -1,0 +1,67 @@
+package net.causw.app.main.shared.exception.errorcode;
+
+import org.springframework.http.HttpStatus;
+
+import net.causw.app.main.shared.exception.BaseResponseCode;
+import net.causw.global.constant.StaticValue;
+
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+
+@RequiredArgsConstructor(access = AccessLevel.PROTECTED)
+public enum AuthErrorCode implements BaseResponseCode {
+
+	UNSUPPORTED_SOCIAL_PROVIDER(HttpStatus.BAD_REQUEST, "AUTH_400_001", "지원하지 않는 소셜 로그인입니다."),
+	INVALID_REGISTRATION_STATUS(HttpStatus.BAD_REQUEST, "AUTH_400_002", "현재 계정 상태로는 수행할 수 없는 요청입니다."),
+	SOCIAL_EMAIL_REQUIRED(HttpStatus.UNPROCESSABLE_ENTITY, "AUTH_422_001", "소셜로그인 계정의 이메일 정보를 확인할 수 없습니다."),
+	INVALID_TOKEN(HttpStatus.UNAUTHORIZED, "AUTH_401_001", "유효하지 않은 토큰입니다"),
+	EXPIRED_TOKEN(HttpStatus.UNAUTHORIZED, "AUTH_401_004", "만료된 토큰입니다"),
+	INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "AUTH_401_002", "유효하지 않은 리프레시토큰입니다"),
+	REFRESH_TOKEN_MISSING(HttpStatus.UNAUTHORIZED, "AUTH_401_003", "토큰 값이 존재하지 않습니다."),
+	USER_ROLE_NONE(HttpStatus.UNAUTHORIZED, "AUTH_401_005", "접근 권한이 없습니다. 다시 로그인 해주세요. 문제 반복시 관리자에게 문의해주세요."),
+	DROPPED_USER(HttpStatus.UNAUTHORIZED, "AUTH_401_006",
+		"추방된 계정입니다. 재가입 문의는 " + StaticValue.ADMIN_EMAIL + "으로 연락해주세요"),
+	INACTIVE_USER(HttpStatus.UNAUTHORIZED, "AUTH_401_007", "탈퇴한 계정입니다. 계정 복구를 진행해주세요"),
+	DELETED_USER(HttpStatus.UNAUTHORIZED, "AUTH_401_008", "삭제된 계정입니다. 회원가입 페이지에서 새로운 정보로 가입해주세요."),
+	INVALID_SOCIAL_IDENTIFIER(HttpStatus.UNAUTHORIZED, "AUTH_401_009", "소셜 로그인 토큰의 식별자 정보가 올바르지 않습니다."),
+	NO_PERMISSION_FOR_RESOURCE(HttpStatus.FORBIDDEN, "AUTH_403_001", "해당 자원에 대한 접근 또는 조작 권한이 없습니다."),
+	UNVERIFIED_SOCIAL_EMAIL(HttpStatus.FORBIDDEN, "AUTH_403_002", "소셜로그인 계정의 이메일이 인증되지 않았습니다."),
+	ALREADY_LINKED_SOCIAL_PROVIDER(HttpStatus.CONFLICT, "AUTH_409_001", "하나의 계정에 소셜로그인 별 하나의 계정만 연동 가능합니다."),
+	NATIVE_SOCIAL_REDIRECT_URI_REQUIRED(HttpStatus.BAD_REQUEST, "AUTH_400_006",
+		"네이티브 소셜 인가 코드로 토큰을 교환하려면 redirectUri가 필요합니다."),
+	SOCIAL_ACCOUNT_LINKED_TO_OTHER_USER(HttpStatus.CONFLICT, "AUTH_409_002",
+		"이미 다른 계정에 연동된 소셜 계정입니다. 계정 통합을 원하시면 관리자에게 문의해주세요."),
+	CANNOT_UNLINK_LAST_LOGIN_METHOD(HttpStatus.CONFLICT, "AUTH_409_003",
+		"비밀번호가 없는 계정은 마지막 소셜 계정 연동을 해제할 수 없습니다."),
+	SOCIAL_ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "AUTH_404_002", "연동된 소셜 계정을 찾을 수 없습니다."),
+
+	// 이메일 인증 관련
+	EMAIL_VERIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "AUTH_404_001", "유효한 이메일 인증 정보를 찾을 수 없습니다."),
+	EMAIL_VERIFICATION_EXPIRED(HttpStatus.BAD_REQUEST, "AUTH_400_003", "이메일 인증 유효 시간이 만료되었습니다."),
+	EMAIL_VERIFICATION_CODE_MISMATCH(HttpStatus.BAD_REQUEST, "AUTH_400_004", "이메일 인증 코드가 일치하지 않습니다."),
+	EMAIL_VERIFICATION_SEND_TOO_SOON(HttpStatus.TOO_MANY_REQUESTS, "AUTH_429_001", "인증 메일 재발송은 30초 후에 가능합니다."),
+
+	// 소셜 연동 해제 관련 에러 코드
+	APPLE_REVOKE_FAILED(HttpStatus.BAD_GATEWAY, "AUTH_502_001", "애플 연동 해제에 실패했습니다. 관리자에게 문의하거나 잠시 후 다시 시도해주세요."),
+	KAKAO_UNLINK_FAILED(HttpStatus.BAD_GATEWAY, "AUTH_502_002", "카카오 연동 해제에 실패했습니다."),
+	GOOGLE_REVOKE_FAILED(HttpStatus.BAD_GATEWAY, "AUTH_502_003", "구글 연동 해제에 실패했습니다.");
+
+	private final HttpStatus status;
+	private final String code;
+	private final String message;
+
+	@Override
+	public String getCode() {
+		return code;
+	}
+
+	@Override
+	public String getMessage() {
+		return message;
+	}
+
+	@Override
+	public HttpStatus getStatus() {
+		return status;
+	}
+}

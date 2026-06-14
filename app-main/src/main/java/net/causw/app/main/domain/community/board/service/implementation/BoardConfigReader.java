@@ -1,0 +1,145 @@
+package net.causw.app.main.domain.community.board.service.implementation;
+
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Component;
+
+import net.causw.app.main.domain.community.board.entity.Board;
+import net.causw.app.main.domain.community.board.entity.BoardConfig;
+import net.causw.app.main.domain.community.board.entity.BoardReadScope;
+import net.causw.app.main.domain.community.board.repository.BoardAdminQueryRepository;
+import net.causw.app.main.domain.community.board.repository.BoardConfigQueryRepository;
+import net.causw.app.main.domain.community.board.repository.BoardConfigRepository;
+import net.causw.app.main.domain.user.academic.enums.userAcademicRecord.AcademicStatus;
+import net.causw.app.main.shared.exception.BaseRunTimeV2Exception;
+import net.causw.app.main.shared.exception.errorcode.BoardConfigErrorCode;
+
+import lombok.RequiredArgsConstructor;
+
+@Component
+@RequiredArgsConstructor
+public class BoardConfigReader {
+	private final BoardConfigQueryRepository boardConfigQueryRepository;
+	private final BoardAdminQueryRepository boardAdminQueryRepository;
+	private final BoardConfigRepository boardConfigRepository;
+
+	/**
+	 * 알림 설정 가능하게 설정된 게시판 리스트 확인
+	 * @return 알림 설정 가능하게 설정된 게시판 리스트
+	 */
+	public List<BoardConfig> findAllNoticeConfigsByReadScope(Set<BoardReadScope> readScopes) {
+		return boardConfigQueryRepository.findAllByIsNoticeTrueAndReadScopeIn(readScopes);
+	}
+
+	/**
+	 * 게시판 ID로 해당 게시판이 공지사항 게시판으로 설정되어 있는지 여부 조회
+	 * @param boardId 게시판 ID
+	 * @return 해당 게시판이 공지사항 게시판으로 설정되어 있는지 여부
+	 */
+	public boolean existsByBoardIdAndIsNotice(String boardId) {
+		return boardConfigRepository.existsByBoardIdAndIsNoticeTrue(boardId);
+	}
+
+	/**
+	 * 게시판 ID 목록에 해당하는 설정을 조회하여 리스트로 반환.
+	 * @param boardIds 게시판 ID 목록
+	 * @return 게시판 ID 목록에 해당하는 설정 리스트
+	 */
+	public List<BoardConfig> getAllBoardConfigInBoardIds(List<String> boardIds) {
+		return boardConfigQueryRepository.findByBoardIdsIn(boardIds);
+	}
+
+	/**
+	 * 게시판 ID 목록에 해당하는 설정을 boardId 기준 Map으로 반환.
+	 */
+	public Map<String, BoardConfig> getBoardConfigMapByBoardIds(List<String> boardIds) {
+
+		return boardConfigQueryRepository.findByBoardIdsIn(boardIds).stream()
+			.collect(Collectors.toMap(BoardConfig::getBoardId, config -> config));
+	}
+
+	/**
+	 * 게시판 ID로 게시판 설정 조회
+	 * @param boardId 게시판 ID
+	 * @return 게시판 설정 Entity
+	 */
+	public BoardConfig getByBoardId(String boardId) {
+
+		return boardConfigQueryRepository.findByBoardId(boardId).orElseThrow(
+			() -> new BaseRunTimeV2Exception(BoardConfigErrorCode.BOARD_CONFIG_NOT_FOUND));
+	}
+
+	/**
+	 * 게시판 ID로 해당 게시판의 관리자 유저 ID 목록 조회
+	 * @param boardId 게시판 ID
+	 * @return 관리자 유저 ID 목록
+	 */
+	public List<String> getAdminIdsByBoardId(String boardId) {
+
+		return boardAdminQueryRepository.findAdminIdsByBoardId(boardId);
+	}
+
+	/**
+	 * 여러 게시판 ID에 대해 boardId → 관리자 userId Set Map을 반환합니다.
+	 *
+	 * @param boardIds 게시판 ID 컬렉션
+	 * @return boardId를 키로 하는 관리자 userId Set Map
+	 */
+	public Map<String, Set<String>> getAdminIdSetMapByBoardIds(Collection<String> boardIds) {
+		Map<String, List<String>> listMap = boardAdminQueryRepository.findAdminIdsByBoardIds(boardIds);
+		return listMap.entrySet().stream()
+			.collect(Collectors.toMap(Map.Entry::getKey, e -> new HashSet<>(e.getValue())));
+	}
+
+	/**
+	 * 다음 게시판 표시 순서 값 조회
+	 * @return 다음 게시판 표시 순서 값
+	 */
+	public int getNextDisplayOrder() {
+
+		return boardConfigQueryRepository.findMaxDisplayOrder() + 10;
+	}
+
+	/**
+	 * 사용자 상태에 따라 접근 가능한 게시판 ID 목록을 조회합니다.
+	 * VISIBLE이고 사용자의 ReadScope에 맞는 게시판만 조회합니다.
+	 *
+	 * @param academicStatus 사용자 학적 상태
+	 * @return 게시판 ID 목록
+	 */
+	public List<String> getAccessibleBoardIdsByAcademicStatus(AcademicStatus academicStatus) {
+		Set<BoardReadScope> scopes = new HashSet<>(BoardReadScope.fromAcademicStatus(academicStatus));
+		return boardConfigQueryRepository.findBoardsByReadScopes(scopes, false);
+	}
+
+	/**
+	 * 사용자 상태 및 탭 필터링 여부에 따라 접근 가능한 게시판 ID 목록을 조회합니다.
+	 * VISIBLE이고 사용자의 ReadScope에 맞는 게시판만 조회합니다.
+	 * 상단 탭 목록 조회용
+	 *
+	 * @param academicStatus 사용자 학적 상태
+	 * @param isTab 탭 노출 여부
+	 * @return 게시판 ID 목록
+	 */
+	public List<String> getAccessibleBoardIdsByAcademicStatus(AcademicStatus academicStatus, boolean isTab) {
+		Set<BoardReadScope> scopes = new HashSet<>(BoardReadScope.fromAcademicStatus(academicStatus));
+		return boardConfigQueryRepository.findBoardsByReadScopes(scopes, isTab);
+	}
+
+	/**
+	 * 사용자 ID에 따라 쓰기 가능한 게시판 목록을 조회합니다.
+	 * VISIBLE이고 사용자의 WriteScope에 맞는 게시판만 조회합니다.
+	 *
+	 * @param userId 사용자 ID
+	 * @param isAdmin 관리자 여부
+	 * @return 쓰기 가능한 게시판 목록
+	 */
+	public List<Board> getWritableBoardIdsByUserId(String userId, boolean isAdmin) {
+		return boardConfigQueryRepository.findWritableBoardsByUserId(userId, isAdmin);
+	}
+}

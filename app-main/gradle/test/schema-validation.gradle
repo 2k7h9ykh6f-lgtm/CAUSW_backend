@@ -1,0 +1,36 @@
+// schema-validation.gradle
+
+tasks.register('schemaValidationTest', Test) {
+    useJUnitPlatform()
+
+    // 테스트 클래스 포함 필터 (패키지 경로 기준)
+    include '**/SchemaValidationTest.class'
+
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+
+    testLogging {
+        exceptionFormat = 'full'
+        showExceptions = true
+        showCauses = true
+        showStackTraces = false
+    }
+
+    // 시스템 환경변수 설정
+    def envFile = project.rootProject.file(".env")
+    if (!envFile.exists()) {
+        throw new GradleException("Required .env file not found")
+    }
+
+    project.logger.lifecycle("🔧 Loading to systemProperties from .env for SchemaValidationTest")
+
+    envFile.eachLine { line ->
+        def trimmedLine = line.trim()
+        if (!trimmedLine || trimmedLine.startsWith('#')) return
+
+        def (key, value) = line.split('=', 2)
+        if (key && value) {
+            systemProperty key.trim(), value.trim()
+        }
+    }
+}
