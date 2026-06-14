@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,6 +56,7 @@ public class ScheduleService {
 
 	/**
 	 * 조건에 따라 일정을 조회하고, 연결된 게시물(targetPostId)에 대한 읽기 권한이 없는 경우 null로 마스킹합니다.
+	 * 모든 일정을 반환하되 권한 없는 targetPostId만 마스킹하는 기존 기본 동작입니다.
 	 *
 	 * @param from   시작 일시
 	 * @param to     종료 일시
@@ -65,12 +67,37 @@ public class ScheduleService {
 	@Transactional(readOnly = true)
 	public List<ScheduleDto> findByConditionWithMasking(LocalDateTime from, LocalDateTime to,
 		Collection<ScheduleType> types, User viewer) {
+		return findByConditionWithMasking(from, to, types, viewer, false);
+	}
+
+	/**
+	 * 조건에 따라 일정을 조회하고, 연결된 게시물(targetPostId)에 대한 읽기 권한 정책을 적용합니다.
+	 * <ul>
+	 *     <li>{@code excludeUnreadablePosts == false} (기본): 모든 일정을 반환하되 권한 없는 targetPostId만 null로 마스킹합니다.</li>
+	 *     <li>{@code excludeUnreadablePosts == true}: targetPostId가 없거나 viewer가 읽을 수 있는 일정만 반환하고,
+	 *         targetPostId가 있으면서 권한이 없는 일정은 목록에서 제외합니다.</li>
+	 * </ul>
+	 *
+	 * @param from                   시작 일시
+	 * @param to                     종료 일시
+	 * @param types                  일정 유형 필터
+	 * @param viewer                 현재 요청 사용자 (null이면 모두 마스킹/제외)
+	 * @param excludeUnreadablePosts true이면 권한 없는 연결 게시물을 가진 일정을 목록에서 제외
+	 * @return 권한 정책이 적용된 일정 목록
+	 */
+	@Transactional(readOnly = true)
+	public List<ScheduleDto> findByConditionWithMasking(LocalDateTime from, LocalDateTime to,
+		Collection<ScheduleType> types, User viewer, boolean excludeUnreadablePosts) {
 		List<ScheduleDto> scheduleDtos = scheduleReader.findByCondition(from, to, types).stream()
 			.map(ScheduleMapper::to)
 			.toList();
 		Set<String> readablePostIds = scheduleMaskingResolver.resolveReadablePostIds(scheduleDtos, viewer);
 
-		return scheduleDtos.stream()
+		Stream<ScheduleDto> stream = scheduleDtos.stream();
+		if (excludeUnreadablePosts) {
+			stream = stream.filter(dto -> scheduleMaskingResolver.isReadableOrUnlinked(dto, readablePostIds));
+		}
+		return stream
 			.map(dto -> scheduleMaskingResolver.maskIfUnreadable(dto, readablePostIds))
 			.toList();
 	}

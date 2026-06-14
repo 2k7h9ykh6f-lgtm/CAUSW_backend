@@ -254,6 +254,50 @@ public class ScheduleMaskingResolverTest {
 		}
 	}
 
+	@Nested
+	@DisplayName("isReadableOrUnlinked 테스트")
+	class IsReadableOrUnlinkedTest {
+
+		@Test
+		@DisplayName("targetPostId가 null인 일반 일정은 노출 대상(true)이다")
+		void targetPostIdIsNull_returnsTrue() {
+			// given
+			ScheduleDto dto = buildScheduleDto(null);
+
+			// when
+			boolean result = scheduleMaskingResolver.isReadableOrUnlinked(dto, Set.of());
+
+			// then
+			assertThat(result).isTrue();
+		}
+
+		@Test
+		@DisplayName("targetPostId가 readablePostIds에 포함되면 노출 대상(true)이다")
+		void targetPostIdIsReadable_returnsTrue() {
+			// given
+			ScheduleDto dto = buildScheduleDto("post-1");
+
+			// when
+			boolean result = scheduleMaskingResolver.isReadableOrUnlinked(dto, Set.of("post-1"));
+
+			// then
+			assertThat(result).isTrue();
+		}
+
+		@Test
+		@DisplayName("targetPostId가 readablePostIds에 없으면 제외 대상(false)이다")
+		void targetPostIdNotReadable_returnsFalse() {
+			// given
+			ScheduleDto dto = buildScheduleDto("post-forbidden");
+
+			// when
+			boolean result = scheduleMaskingResolver.isReadableOrUnlinked(dto, Set.of("post-other"));
+
+			// then
+			assertThat(result).isFalse();
+		}
+	}
+
 	// ── Fixture 헬퍼 ──────────────────────────────────────────────────────────
 
 	private ScheduleDto buildScheduleDto(String targetPostId) {

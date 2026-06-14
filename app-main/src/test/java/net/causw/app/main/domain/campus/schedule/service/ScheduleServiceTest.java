@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.never;
 import static org.mockito.BDDMockito.verify;
@@ -357,6 +358,135 @@ public class ScheduleServiceTest {
 			verify(scheduleReader).findById(scheduleId);
 			verify(scheduleMaskingResolver).resolveReadablePostIds(anyList(), eq(viewer));
 			verify(scheduleMaskingResolver).maskIfUnreadable(any(ScheduleDto.class), any());
+		}
+	}
+
+	@Nested
+	@DisplayName("권한 없는 연결 일정 제외 필터 테스트")
+	class ExcludeUnreadablePostsTest {
+
+		private final LocalDateTime from = LocalDateTime.of(2026, 4, 1, 0, 0);
+		private final LocalDateTime to = LocalDateTime.of(2026, 4, 30, 23, 59);
+		private final List<ScheduleType> types = List.of(ScheduleType.ACADEMIC);
+
+		@Test
+		@DisplayName("excludeUnreadablePosts=true & 익명 사용자: 연결 게시물이 있는 일정은 제외되고 일반 일정만 반환된다")
+		void excludeTrue_anonymous_keepsOnlyUnlinked() {
+			// given
+			Schedule linked = scheduleWithPost("공지 연동 일정", "post-1");
+			Schedule standalone = scheduleWithPost("일반 일정", null);
+			given(scheduleReader.findByCondition(from, to, types)).willReturn(List.of(linked, standalone));
+			given(scheduleMaskingResolver.resolveReadablePostIds(anyList(), isNull())).willReturn(Set.of());
+			stubIsReadableOrUnlinkedWithRealLogic();
+			stubMaskPassthrough();
+
+			// when
+			List<ScheduleDto> result = scheduleService.findByConditionWithMasking(from, to, types, null, true);
+
+			// then
+			assertThat(result).hasSize(1);
+			assertThat(result.get(0).title()).isEqualTo("일반 일정");
+			assertThat(result.get(0).targetPostId()).isNull();
+		}
+
+		@Test
+		@DisplayName("excludeUnreadablePosts=true & 권한 없는 사용자: 권한 없는 연결 일정은 제외되고 일반 일정만 반환된다")
+		void excludeTrue_userWithoutPermission_keepsOnlyUnlinked() {
+			// given
+			User viewer = ObjectFixtures.getCertifiedUserWithId("viewer-id");
+			Schedule linked = scheduleWithPost("공지 연동 일정", "post-forbidden");
+			Schedule standalone = scheduleWithPost("일반 일정", null);
+			given(scheduleReader.findByCondition(from, to, types)).willReturn(List.of(linked, standalone));
+			given(scheduleMaskingResolver.resolveReadablePostIds(anyList(), eq(viewer))).willReturn(Set.of());
+			stubIsReadableOrUnlinkedWithRealLogic();
+			stubMaskPassthrough();
+
+			// when
+			List<ScheduleDto> result = scheduleService.findByConditionWithMasking(from, to, types, viewer, true);
+
+			// then
+			assertThat(result).hasSize(1);
+			assertThat(result.get(0).title()).isEqualTo("일반 일정");
+			assertThat(result.get(0).targetPostId()).isNull();
+		}
+
+		@Test
+		@DisplayName("excludeUnreadablePosts=true & 권한 있는 사용자: 읽기 가능한 연결 일정과 일반 일정은 유지되고 권한 없는 연결 일정만 제외된다")
+		void excludeTrue_userWithPermission_keepsReadableAndUnlinked() {
+			// given
+			User viewer = ObjectFixtures.getCertifiedUserWithId("viewer-id");
+			Schedule readableLinked = scheduleWithPost("읽기 가능 공지 일정", "post-readable");
+			Schedule forbiddenLinked = scheduleWithPost("권한 없는 공지 일정", "post-forbidden");
+			Schedule standalone = scheduleWithPost("일반 일정", null);
+			given(scheduleReader.findByCondition(from, to, types))
+				.willReturn(List.of(readableLinked, forbiddenLinked, standalone));
+			given(scheduleMaskingResolver.resolveReadablePostIds(anyList(), eq(viewer)))
+				.willReturn(Set.of("post-readable"));
+			stubIsReadableOrUnlinkedWithRealLogic();
+			stubMaskPassthrough();
+
+			// when
+			List<ScheduleDto> result = scheduleService.findByConditionWithMasking(from, to, types, viewer, true);
+
+			// then
+			assertThat(result).hasSize(2);
+			assertThat(result).extracting(ScheduleDto::title)
+				.containsExactlyInAnyOrder("읽기 가능 공지 일정", "일반 일정");
+			assertThat(result).extracting(ScheduleDto::targetPostId).doesNotContain("post-forbidden");
+		}
+
+		@Test
+		@DisplayName("기본 동작(excludeUnreadablePosts=false)은 일정을 제외하지 않고 권한 없는 targetPostId만 마스킹한다")
+		void excludeFalse_masksButKeepsAll() {
+			// given
+			User viewer = ObjectFixtures.getCertifiedUserWithId("viewer-id");
+			Schedule readableLinked = scheduleWithPost("읽기 가능 공지 일정", "post-readable");
+			Schedule forbiddenLinked = scheduleWithPost("권한 없는 공지 일정", "post-forbidden");
+			Schedule standalone = scheduleWithPost("일반 일정", null);
+			given(scheduleReader.findByCondition(from, to, types))
+				.willReturn(List.of(readableLinked, forbiddenLinked, standalone));
+			given(scheduleMaskingResolver.resolveReadablePostIds(anyList(), eq(viewer)))
+				.willReturn(Set.of("post-readable"));
+			given(scheduleMaskingResolver.maskIfUnreadable(any(ScheduleDto.class), any()))
+				.willAnswer(inv -> {
+					ScheduleDto dto = inv.getArgument(0);
+					Set<String> readable = inv.getArgument(1);
+					return dto.targetPostId() == null || readable.contains(dto.targetPostId())
+						? dto : ScheduleMapper.toWithoutTargetPost(dto);
+				});
+
+			// when
+			List<ScheduleDto> result = scheduleService.findByConditionWithMasking(from, to, types, viewer, false);
+
+			// then
+			assertThat(result).hasSize(3);
+			assertThat(result).extracting(ScheduleDto::targetPostId)
+				.containsExactlyInAnyOrder("post-readable", null, null);
+			verify(scheduleMaskingResolver, never()).isReadableOrUnlinked(any(ScheduleDto.class), any());
+		}
+
+		private Schedule scheduleWithPost(String title, String targetPostId) {
+			return Schedule.of(
+				title,
+				ScheduleType.ACADEMIC,
+				LocalDateTime.of(2026, 4, 15, 0, 0),
+				LocalDateTime.of(2026, 4, 21, 23, 59),
+				mockUser,
+				targetPostId);
+		}
+
+		private void stubIsReadableOrUnlinkedWithRealLogic() {
+			given(scheduleMaskingResolver.isReadableOrUnlinked(any(ScheduleDto.class), any()))
+				.willAnswer(inv -> {
+					ScheduleDto dto = inv.getArgument(0);
+					Set<String> readable = inv.getArgument(1);
+					return dto.targetPostId() == null || readable.contains(dto.targetPostId());
+				});
+		}
+
+		private void stubMaskPassthrough() {
+			given(scheduleMaskingResolver.maskIfUnreadable(any(ScheduleDto.class), any()))
+				.willAnswer(inv -> inv.getArgument(0));
 		}
 	}
 }

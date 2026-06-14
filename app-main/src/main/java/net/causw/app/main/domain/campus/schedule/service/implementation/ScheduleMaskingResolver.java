@@ -67,6 +67,18 @@ public class ScheduleMaskingResolver {
 	}
 
 	/**
+	 * 일정이 목록에 노출 가능한지(연결 게시글이 없거나 viewer가 읽을 수 있는지) 여부를 반환합니다.
+	 * targetPostId가 null이거나 readablePostIds에 포함되면 true입니다.
+	 *
+	 * @param dto             검사 대상 일정 DTO
+	 * @param readablePostIds viewer가 읽기 가능한 게시글 ID 집합
+	 * @return targetPostId가 없거나 읽기 가능하면 true
+	 */
+	public boolean isReadableOrUnlinked(ScheduleDto dto, Set<String> readablePostIds) {
+		return dto.targetPostId() == null || readablePostIds.contains(dto.targetPostId());
+	}
+
+	/**
 	 * viewer가 targetPostId를 읽을 수 없는 경우 targetPostId를 null로 마스킹한 ScheduleDto를 반환합니다.
 	 *
 	 * @param dto             마스킹 대상 일정 DTO
@@ -74,7 +86,7 @@ public class ScheduleMaskingResolver {
 	 * @return 마스킹이 적용된 ScheduleDto
 	 */
 	public ScheduleDto maskIfUnreadable(ScheduleDto dto, Set<String> readablePostIds) {
-		if (dto.targetPostId() == null || readablePostIds.contains(dto.targetPostId())) {
+		if (isReadableOrUnlinked(dto, readablePostIds)) {
 			return dto;
 		}
 		return ScheduleMapper.toWithoutTargetPost(dto);
