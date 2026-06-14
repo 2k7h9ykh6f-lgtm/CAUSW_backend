@@ -12,6 +12,7 @@ import net.causw.app.main.domain.user.academic.service.dto.response.AcademicReco
 import net.causw.app.main.domain.user.academic.service.implementation.AcademicRecordApplicationReader;
 import net.causw.app.main.domain.user.academic.service.implementation.AcademicRecordApplicationWriter;
 import net.causw.app.main.domain.user.academic.service.implementation.AcademicRecordLogCreator;
+import net.causw.app.main.domain.user.academic.util.AcademicRecordApplicationValidator;
 import net.causw.app.main.domain.user.account.entity.user.User;
 
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ public class AcademicRecordAdminService {
 	private final AcademicRecordApplicationReader applicationReader;
 	private final AcademicRecordApplicationWriter applicationWriter;
 	private final AcademicRecordLogCreator logCreator;
+	private final AcademicRecordApplicationValidator applicationValidator;
 
 	/**
 	 * 학적 변경 신청 목록을 조건에 따라 페이징 조회한다.
@@ -54,6 +56,7 @@ public class AcademicRecordAdminService {
 	@Transactional
 	public void approve(User admin, String applicationId) {
 		UserAcademicRecordApplication application = applicationReader.findById(applicationId);
+		applicationValidator.validateAwaiting(application);
 		applicationWriter.approve(application);
 		logCreator.createFromApplication(admin, application);
 	}
@@ -64,6 +67,7 @@ public class AcademicRecordAdminService {
 	@Transactional
 	public void reject(User admin, String applicationId, String rejectReason) {
 		UserAcademicRecordApplication application = applicationReader.findById(applicationId);
+		applicationValidator.validateAwaiting(application);
 		applicationWriter.reject(application, rejectReason);
 		logCreator.createFromApplication(admin, application);
 	}

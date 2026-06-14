@@ -16,7 +16,9 @@ public enum AcademicRecordApplicationErrorCode implements BaseResponseCode {
 	ACADEMIC_RECORD_INVALID_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "ACADEMIC_APPLICATION_400_002",
 		"요청한 학적 상태 전환을 수행할 수 없습니다."),
 	ACADEMIC_RECORD_ENROLLMENT_IMAGE_REQUIRED(HttpStatus.BAD_REQUEST, "ACADEMIC_APPLICATION_400_003",
-		"재학 변경 신청 시 증빙 이미지가 필요합니다.");
+		"재학 변경 신청 시 증빙 이미지가 필요합니다."),
+	ACADEMIC_RECORD_APPLICATION_ALREADY_PROCESSED(HttpStatus.BAD_REQUEST, "ACADEMIC_APPLICATION_400_004",
+		"이미 처리된 학적 변경 신청입니다.");
 
 	private final HttpStatus status;
 	private final String code;

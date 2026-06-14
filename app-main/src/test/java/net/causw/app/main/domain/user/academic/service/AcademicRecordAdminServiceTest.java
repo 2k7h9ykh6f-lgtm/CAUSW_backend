@@ -26,6 +26,7 @@ import net.causw.app.main.domain.user.academic.service.dto.response.AcademicReco
 import net.causw.app.main.domain.user.academic.service.implementation.AcademicRecordApplicationReader;
 import net.causw.app.main.domain.user.academic.service.implementation.AcademicRecordApplicationWriter;
 import net.causw.app.main.domain.user.academic.service.implementation.AcademicRecordLogCreator;
+import net.causw.app.main.domain.user.academic.util.AcademicRecordApplicationValidator;
 import net.causw.app.main.domain.user.account.entity.user.User;
 import net.causw.app.main.shared.exception.BaseRunTimeV2Exception;
 import net.causw.app.main.shared.exception.errorcode.AcademicRecordApplicationErrorCode;
@@ -42,6 +43,9 @@ class AcademicRecordAdminServiceTest {
 
 	@Mock
 	private AcademicRecordLogCreator logCreator;
+
+	@Mock
+	private AcademicRecordApplicationValidator applicationValidator;
 
 	@InjectMocks
 	private AcademicRecordAdminService academicRecordAdminService;
@@ -189,8 +193,8 @@ class AcademicRecordAdminServiceTest {
 		}
 
 		@Test
-		@DisplayName("AWAIT 상태가 아닌 신청 승인 시 예외가 발생한다")
-		void approve_notAwaiting() {
+		@DisplayName("이미 처리된 신청을 승인하면 validator가 ACADEMIC_RECORD_APPLICATION_ALREADY_PROCESSED 예외를 던진다")
+		void approve_alreadyProcessed() {
 			// given
 			String applicationId = "application-id";
 			User admin = ObjectFixtures.getCertifiedUser();
@@ -205,13 +209,16 @@ class AcademicRecordAdminServiceTest {
 
 			when(applicationReader.findById(applicationId))
 				.thenReturn(application);
-			doThrow(AcademicRecordApplicationErrorCode.ACADEMIC_RECORD_APPLICATION_NOT_AWAITING.toBaseException())
-				.when(applicationWriter).approve(application);
+			doThrow(AcademicRecordApplicationErrorCode.ACADEMIC_RECORD_APPLICATION_ALREADY_PROCESSED.toBaseException())
+				.when(applicationValidator).validateAwaiting(application);
 
 			// when & then
 			assertThatThrownBy(() -> academicRecordAdminService.approve(admin, applicationId))
-				.isInstanceOf(BaseRunTimeV2Exception.class);
+				.isInstanceOf(BaseRunTimeV2Exception.class)
+				.extracting("errorCode")
+				.isEqualTo(AcademicRecordApplicationErrorCode.ACADEMIC_RECORD_APPLICATION_ALREADY_PROCESSED);
 
+			verify(applicationWriter, never()).approve(any());
 			verify(logCreator, never()).createFromApplication(any(), any());
 		}
 	}
@@ -269,8 +276,8 @@ class AcademicRecordAdminServiceTest {
 		}
 
 		@Test
-		@DisplayName("AWAIT 상태가 아닌 신청 반려 시 예외가 발생한다")
-		void reject_notAwaiting() {
+		@DisplayName("이미 처리된 신청을 반려하면 validator가 ACADEMIC_RECORD_APPLICATION_ALREADY_PROCESSED 예외를 던진다")
+		void reject_alreadyProcessed() {
 			// given
 			String applicationId = "application-id";
 			String rejectReason = "서류가 불충분합니다";
@@ -286,13 +293,16 @@ class AcademicRecordAdminServiceTest {
 
 			when(applicationReader.findById(applicationId))
 				.thenReturn(application);
-			doThrow(AcademicRecordApplicationErrorCode.ACADEMIC_RECORD_APPLICATION_NOT_AWAITING.toBaseException())
-				.when(applicationWriter).reject(application, rejectReason);
+			doThrow(AcademicRecordApplicationErrorCode.ACADEMIC_RECORD_APPLICATION_ALREADY_PROCESSED.toBaseException())
+				.when(applicationValidator).validateAwaiting(application);
 
 			// when & then
 			assertThatThrownBy(() -> academicRecordAdminService.reject(admin, applicationId, rejectReason))
-				.isInstanceOf(BaseRunTimeV2Exception.class);
+				.isInstanceOf(BaseRunTimeV2Exception.class)
+				.extracting("errorCode")
+				.isEqualTo(AcademicRecordApplicationErrorCode.ACADEMIC_RECORD_APPLICATION_ALREADY_PROCESSED);
 
+			verify(applicationWriter, never()).reject(any(), any());
 			verify(logCreator, never()).createFromApplication(any(), any());
 		}
 	}
