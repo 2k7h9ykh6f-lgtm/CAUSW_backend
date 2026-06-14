@@ -205,46 +205,8 @@ public class PostService {
 			size,
 			keyword);
 
-		// Slice에서 content와 hasNext 추출
-		List<PostCursorResult> posts = slice.getContent();
-		boolean hasNext = slice.hasNext();
-
-		// 다음 커서 생성
-		String nextCursor = null;
-		if (hasNext && !posts.isEmpty()) {
-			PostCursorResult lastPost = posts.get(posts.size() - 1);
-			nextCursor = PostCursorManager.createNextCursor(lastPost.createdAt(), lastPost.postId());
-		}
-
-		// 게시글 이미지 조회
-		List<String> postIds = posts.stream().map(PostCursorResult::postId).toList();
-		Map<String, List<String>> postImagesMap = postIds.isEmpty()
-			? Map.of()
-			: postReader.findPostImagesByPostIds(postIds);
-
-		// 좋아요 여부 배치 조회
-		Set<String> likedPostIds = postIds.isEmpty()
-			? Set.of()
-			: likePostReader.getLikedPostIds(viewer.getId(), postIds);
-
-		// 게시판 설정 배치 조회
-		List<String> uniqueBoardIds = posts.stream().map(PostCursorResult::boardId).filter(Objects::nonNull)
-			.distinct().toList();
-		Map<String, BoardConfig> boardConfigMap = boardConfigReader.getBoardConfigMapByBoardIds(uniqueBoardIds);
-
-		// 작성자 중 Role이 ADMIN인 사용자 ID 조회 (시스템 관리자 판별용)
-		List<String> writerIds = posts.stream()
-			.map(PostCursorResult::writerId)
-			.filter(Objects::nonNull)
-			.distinct()
-			.toList();
-		Set<String> adminWriterIds = postReader.findAdminUserIds(writerIds);
-
-		// PostListResult로 변환 (PostMapper 사용)
-		List<PostListResult.PostItem> postItems = buildPostItems(posts, postImagesMap, likedPostIds, viewer,
-			boardConfigMap, adminWriterIds);
-
-		return PostListResult.of(postItems, nextCursor);
+		// 공통 조립 경로로 위임 (다른 목록 조회 메서드와 동일한 필드 채움 규칙 적용)
+		return assemblePostListResult(slice, viewer);
 	}
 
 	/**
@@ -353,7 +315,7 @@ public class PostService {
 			parsedCursor.postId(),
 			pageSize);
 
-		return getPostListResult(slice, user);
+		return assemblePostListResult(slice, user);
 	}
 
 	/**
@@ -374,7 +336,7 @@ public class PostService {
 			parsedCursor.postId(),
 			pageSize);
 
-		return getPostListResult(slice, user);
+		return assemblePostListResult(slice, user);
 	}
 
 	/**
@@ -396,11 +358,11 @@ public class PostService {
 			parsedCursor.postId(),
 			pageSize);
 
-		return getPostListResult(slice, user);
+		return assemblePostListResult(slice, user);
 	}
 
 	@NotNull
-	private PostListResult getPostListResult(Slice<PostCursorResult> slice, User viewer) {
+	private PostListResult assemblePostListResult(Slice<PostCursorResult> slice, User viewer) {
 		List<PostCursorResult> posts = slice.getContent();
 		if (posts.isEmpty()) {
 			return PostListResult.of(List.of(), null);

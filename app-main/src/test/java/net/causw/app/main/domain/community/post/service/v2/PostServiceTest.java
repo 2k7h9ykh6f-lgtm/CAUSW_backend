@@ -1435,4 +1435,174 @@ public class PostServiceTest {
 				.isInstanceOf(BaseRunTimeV2Exception.class);
 		}
 	}
+
+	@Nested
+	@DisplayName("게시글 목록 조립 일관성 테스트")
+	class PostListConsistencyTest {
+
+		User viewer;
+		String boardId;
+		BoardConfig normalBoardConfig;
+
+		@BeforeEach
+		void setUp() {
+			viewer = ObjectFixtures.getCertifiedUserWithId("viewer-id");
+			viewer.setAcademicStatus(AcademicStatus.ENROLLED);
+			boardId = "board-id";
+			normalBoardConfig = BoardConfig.of(
+				boardId, false, BoardReadScope.BOTH, BoardWriteScope.ALL_USER, false,
+				BoardVisibility.VISIBLE, 10, null, null);
+		}
+
+		/**
+		 * 네 가지 목록 조회가 모두 소비하는 단일 PostCursorResult.
+		 * writerId를 viewer와 동일하게 두어 isOwner 채움 규칙까지 검증한다.
+		 */
+		private PostCursorResult cursorResult(boolean isAnonymous, boolean isCrawled) {
+			return new PostCursorResult(
+				"post-id",
+				"게시글 내용",
+				5L,
+				10L,
+				3L,
+				isAnonymous,
+				null,
+				false,
+				isCrawled,
+				true,
+				"viewer-id",
+				"작성자",
+				"닉네임",
+				2020,
+				UserState.ACTIVE,
+				ProfileImageType.CUSTOM,
+				"profile-url",
+				LocalDateTime.of(2024, 1, 1, 12, 0),
+				LocalDateTime.of(2024, 1, 1, 12, 0),
+				boardId,
+				"테스트 게시판");
+		}
+
+		/** 네 가지 목록 조회 메서드가 공통으로 거치는 조립 단계(이미지/좋아요/게시판설정/관리자) stubbing */
+		private void stubAssemblyCollaborators(BoardConfig boardConfig, List<String> imageUrls,
+			Set<String> likedPostIds) {
+			given(blockReader.findBlockeeUserIdsByBlocker(viewer)).willReturn(Set.of());
+			given(postReader.findPostImagesByPostIds(anyList())).willReturn(Map.of("post-id", imageUrls));
+			given(likePostReader.getLikedPostIds(eq("viewer-id"), anyList())).willReturn(likedPostIds);
+			given(boardConfigReader.getBoardConfigMapByBoardIds(anyList()))
+				.willReturn(Map.of(boardId, boardConfig));
+			given(postReader.findAdminUserIds(anyList())).willReturn(Set.of());
+			// getPosts 경로 전용 게시판 접근 검증 stub
+			given(boardConfigReader.getByBoardId(boardId)).willReturn(boardConfig);
+			given(boardConfigReader.getAdminIdsByBoardId(boardId)).willReturn(List.of());
+		}
+
+		/** 동일 slice로 네 가지 목록 조회를 실행하고 [getPosts, commented, written, liked] 순으로 결과 반환 */
+		private List<PostListResult> runAllFourLists(Slice<PostCursorResult> slice) {
+			given(postReader.findPostsWithCursor(anyList(), anySet(), any(), any(), anyInt(), any()))
+				.willReturn(slice);
+			given(postReader.findPostsCommentedByUserWithCursor(anyString(), anySet(), any(), any(), anyInt()))
+				.willReturn(slice);
+			given(postReader.findPostsWrittenByUserWithCursor(anyString(), any(), any(), anyInt()))
+				.willReturn(slice);
+			given(postReader.findPostsLikedByUserWithCursor(anyString(), anySet(), any(), any(), anyInt()))
+				.willReturn(slice);
+
+			PostListResult posts = postService.getPosts(
+				PostListQuery.of(viewer, List.of(boardId), null, 20, null));
+			PostListResult commented = postService.getPostsCommentedByUser(viewer, null, 20);
+			PostListResult written = postService.getPostsWrittenByUser(viewer, null, 20);
+			PostListResult liked = postService.getPostsLikedByUser(viewer, null, 20);
+
+			return List.of(posts, commented, written, liked);
+		}
+
+		@DisplayName("일반 게시글: 네 가지 목록의 PostItem 구조가 모두 동일하다")
+		@Test
+		void fourLists_shouldProduceIdenticalPostItemStructure() {
+			// given
+			List<String> imageUrls = List.of("https://img/1.jpg", "https://img/2.jpg");
+			stubAssemblyCollaborators(normalBoardConfig, imageUrls, Set.of("post-id"));
+
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(cursorResult(false, false)), PageRequest.of(0, 20), false);
+
+			// when
+			List<PostListResult> results = runAllFourLists(slice);
+
+			// then - 모든 목록은 단일 PostItem을 반환하고 hasNext=false이므로 nextCursor는 null
+			for (PostListResult result : results) {
+				assertThat(result.posts()).hasSize(1);
+				assertThat(result.nextCursor()).isNull();
+			}
+
+			// 공통 필드 채움 규칙(imageUrls / liked / owner / official / 작성자 정보) 검증
+			PostListResult.PostItem reference = results.get(0).posts().get(0);
+			assertAll(
+				() -> assertThat(reference.postImageUrls()).isEqualTo(imageUrls),
+				() -> assertThat(reference.isPostLike()).isTrue(),
+				() -> assertThat(reference.isOwner()).isTrue(),
+				() -> assertThat(reference.isOfficial()).isFalse(),
+				() -> assertThat(reference.writerNickname()).isEqualTo("닉네임"),
+				() -> assertThat(reference.writerProfileImage().profileImageUrl()).isEqualTo("profile-url"),
+				() -> assertThat(reference.boardName()).isEqualTo("테스트 게시판"));
+
+			// 네 목록의 PostItem이 필드 단위로 완전히 동일한지 검증
+			for (PostListResult result : results) {
+				assertThat(result.posts().get(0))
+					.usingRecursiveComparison()
+					.isEqualTo(reference);
+			}
+		}
+
+		@DisplayName("공지 게시판: 네 가지 목록 모두 공식 배지/닉네임 마스킹이 동일하게 적용된다")
+		@Test
+		void fourLists_shouldApplyOfficialBadgeConsistently() {
+			// given
+			BoardConfig noticeBoardConfig = BoardConfig.of(
+				boardId, false, BoardReadScope.BOTH, BoardWriteScope.ALL_USER, true,
+				BoardVisibility.VISIBLE, 10, "공식 계정", null);
+			stubAssemblyCollaborators(noticeBoardConfig, List.of(), Set.of());
+
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(cursorResult(false, false)), PageRequest.of(0, 20), false);
+
+			// when
+			List<PostListResult> results = runAllFourLists(slice);
+
+			// then
+			PostListResult.PostItem reference = results.get(0).posts().get(0);
+			assertAll(
+				() -> assertThat(reference.isOfficial()).isTrue(),
+				() -> assertThat(reference.writerNickname()).isEqualTo("공식 계정"),
+				() -> assertThat(reference.writerProfileImage().profileImageType())
+					.isEqualTo(ProfileImageType.UNSET));
+
+			for (PostListResult result : results) {
+				assertThat(result.posts().get(0))
+					.usingRecursiveComparison()
+					.isEqualTo(reference);
+			}
+		}
+
+		@DisplayName("hasNext=true: 네 가지 목록이 동일한 nextCursor를 생성한다")
+		@Test
+		void fourLists_shouldGenerateConsistentNextCursor() {
+			// given
+			stubAssemblyCollaborators(normalBoardConfig, List.of(), Set.of());
+
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(cursorResult(false, false)), PageRequest.of(0, 20), true);
+
+			// when
+			List<PostListResult> results = runAllFourLists(slice);
+
+			// then
+			String referenceCursor = results.get(0).nextCursor();
+			assertThat(referenceCursor).isNotNull();
+			for (PostListResult result : results) {
+				assertThat(result.nextCursor()).isEqualTo(referenceCursor);
+			}
+		}
+	}
 }
