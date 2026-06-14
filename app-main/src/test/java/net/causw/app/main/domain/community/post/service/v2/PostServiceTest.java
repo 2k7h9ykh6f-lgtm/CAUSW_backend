@@ -42,6 +42,7 @@ import org.springframework.web.multipart.MultipartFile;
 import net.causw.app.main.domain.asset.file.entity.UuidFile;
 import net.causw.app.main.domain.asset.file.entity.joinEntity.PostAttachImage;
 import net.causw.app.main.domain.asset.file.enums.FilePath;
+import net.causw.app.main.domain.asset.file.service.v2.implementation.FileReader;
 import net.causw.app.main.domain.asset.file.service.v2.implementation.UserProfileImageReader;
 import net.causw.app.main.domain.community.board.entity.Board;
 import net.causw.app.main.domain.community.board.entity.BoardConfig;
@@ -119,6 +120,9 @@ public class PostServiceTest {
 
 	@Mock
 	UserProfileImageReader userProfileImageReader;
+
+	@Mock
+	FileReader fileReader;
 
 	@Nested
 	@DisplayName("게시글 생성 테스트")
@@ -1434,5 +1438,601 @@ public class PostServiceTest {
 			assertThatThrownBy(() -> postService.getPostDetail(query))
 				.isInstanceOf(BaseRunTimeV2Exception.class);
 		}
+	}
+
+	// ── 사용자별 게시글 목록 조회 테스트 ─────────────────────────────────────────────
+	// getPostsCommentedByUser, getPostsWrittenByUser, getPostsLikedByUser 세 메서드가
+	// getPosts와 동일한 구조의 PostListResult를 반환하는지 검증합니다.
+	// 네 메서드 모두 assemblePostListResult라는 단일 조립 경로를 사용함을 확인합니다.
+
+	@Nested
+	@DisplayName("사용자가 댓글 단 게시글 목록 조회 테스트")
+	class GetPostsCommentedByUserTest {
+
+		User viewer;
+		String boardId;
+		BoardConfig boardConfig;
+
+		@BeforeEach
+		void setUp() {
+			viewer = ObjectFixtures.getCertifiedUserWithId("viewer-id");
+			boardId = "board-id";
+			boardConfig = BoardConfig.of(
+				boardId, false, BoardReadScope.BOTH, BoardWriteScope.ALL_USER,
+				false, BoardVisibility.VISIBLE, 10, null, null);
+			Mockito.lenient().when(blockReader.findBlockeeUserIdsByBlocker(viewer)).thenReturn(Set.of());
+			Mockito.lenient().when(boardConfigReader.getBoardConfigMapByBoardIds(anyList()))
+				.thenReturn(Map.of(boardId, boardConfig));
+		}
+
+		@DisplayName("댓글 단 게시글 목록 조회 성공 — getPosts와 동일한 PostItem 구조 반환")
+		@Test
+		void getPostsCommentedByUser_shouldReturnSameStructureAsGetPosts() {
+			// given
+			PostCursorResult postCursorResult = createSamplePostCursorResult("post-1", boardId, "테스트 게시판");
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(postCursorResult), PageRequest.of(0, 20), false);
+
+			given(postReader.findPostsCommentedByUserWithCursor(
+				eq("viewer-id"), anySet(), isNull(), isNull(), eq(20)))
+				.willReturn(slice);
+			stubBatchFetchers();
+
+			// when
+			PostListResult result = postService.getPostsCommentedByUser(viewer, null, 20);
+
+			// then
+			assertPostListStructure(result, "post-1", boardId);
+			verify(postReader, times(1)).findPostsCommentedByUserWithCursor(
+				eq("viewer-id"), anySet(), isNull(), isNull(), eq(20));
+		}
+
+		@DisplayName("댓글 단 게시글 목록 — 차단한 사용자의 게시글 제외")
+		@Test
+		void getPostsCommentedByUser_shouldExcludeBlockedUsers() {
+			// given
+			Set<String> blockedUserIds = Set.of("blocked-writer-id");
+			given(blockReader.findBlockeeUserIdsByBlocker(viewer)).willReturn(blockedUserIds);
+			given(postReader.findPostsCommentedByUserWithCursor(
+				eq("viewer-id"), eq(blockedUserIds), isNull(), isNull(), eq(20)))
+				.willReturn(new SliceImpl<>(List.of(), PageRequest.of(0, 20), false));
+
+			// when
+			PostListResult result = postService.getPostsCommentedByUser(viewer, null, 20);
+
+			// then
+			assertThat(result.posts()).isEmpty();
+			verify(postReader, times(1)).findPostsCommentedByUserWithCursor(
+				eq("viewer-id"), eq(blockedUserIds), isNull(), isNull(), eq(20));
+		}
+
+		@DisplayName("댓글 단 게시글 목록 — 커서 기반 페이징 및 다음 커서 반환")
+		@Test
+		void getPostsCommentedByUser_shouldSupportCursorPaging() {
+			// given
+			PostCursorResult postCursorResult = createSamplePostCursorResult("post-2", boardId, "테스트 게시판");
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(postCursorResult), PageRequest.of(0, 20), true);
+
+			String cursor = "2024-06-01T12:00:00|post-1";
+			given(postReader.findPostsCommentedByUserWithCursor(
+				eq("viewer-id"), anySet(), eq("2024-06-01T12:00:00"), eq("post-1"), eq(10)))
+				.willReturn(slice);
+			stubBatchFetchers();
+
+			// when
+			PostListResult result = postService.getPostsCommentedByUser(viewer, cursor, 10);
+
+			// then
+			assertAll(
+				() -> assertThat(result.posts()).hasSize(1),
+				() -> assertThat(result.nextCursor()).isNotNull(),
+				() -> assertThat(result.nextCursor()).contains("post-2"));
+		}
+
+		@DisplayName("댓글 단 게시글 목록 — 익명 게시글 작성자 정보 보호")
+		@Test
+		void getPostsCommentedByUser_shouldMaskAnonymousWriter() {
+			// given
+			PostCursorResult anonymousPost = createAnonymousPostCursorResult("post-anon", boardId);
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(anonymousPost), PageRequest.of(0, 20), false);
+
+			given(postReader.findPostsCommentedByUserWithCursor(
+				eq("viewer-id"), anySet(), isNull(), isNull(), eq(20)))
+				.willReturn(slice);
+			stubBatchFetchers();
+
+			// when
+			PostListResult result = postService.getPostsCommentedByUser(viewer, null, 20);
+
+			// then
+			assertAnonymousPostItem(result);
+		}
+
+		@DisplayName("댓글 단 게시글 목록 — 빈 결과 반환")
+		@Test
+		void getPostsCommentedByUser_shouldReturnEmpty_whenNoPosts() {
+			// given
+			given(postReader.findPostsCommentedByUserWithCursor(
+				eq("viewer-id"), anySet(), isNull(), isNull(), eq(20)))
+				.willReturn(new SliceImpl<>(List.of(), PageRequest.of(0, 20), false));
+
+			// when
+			PostListResult result = postService.getPostsCommentedByUser(viewer, null, 20);
+
+			// then
+			assertAll(
+				() -> assertThat(result.posts()).isEmpty(),
+				() -> assertThat(result.nextCursor()).isNull());
+		}
+	}
+
+	@Nested
+	@DisplayName("사용자가 작성한 게시글 목록 조회 테스트")
+	class GetPostsWrittenByUserTest {
+
+		User viewer;
+		String boardId;
+		BoardConfig boardConfig;
+
+		@BeforeEach
+		void setUp() {
+			viewer = ObjectFixtures.getCertifiedUserWithId("viewer-id");
+			boardId = "board-id";
+			boardConfig = BoardConfig.of(
+				boardId, false, BoardReadScope.BOTH, BoardWriteScope.ALL_USER,
+				false, BoardVisibility.VISIBLE, 10, null, null);
+			Mockito.lenient().when(boardConfigReader.getBoardConfigMapByBoardIds(anyList()))
+				.thenReturn(Map.of(boardId, boardConfig));
+		}
+
+		@DisplayName("작성한 게시글 목록 조회 성공 — getPosts와 동일한 PostItem 구조 반환")
+		@Test
+		void getPostsWrittenByUser_shouldReturnSameStructureAsGetPosts() {
+			// given
+			PostCursorResult postCursorResult = createSamplePostCursorResult("post-1", boardId, "테스트 게시판");
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(postCursorResult), PageRequest.of(0, 20), false);
+
+			given(postReader.findPostsWrittenByUserWithCursor(
+				eq("viewer-id"), isNull(), isNull(), eq(20)))
+				.willReturn(slice);
+			stubBatchFetchers();
+
+			// when
+			PostListResult result = postService.getPostsWrittenByUser(viewer, null, 20);
+
+			// then
+			assertPostListStructure(result, "post-1", boardId);
+			// 본인 게시글이므로 isOwner = true
+			assertThat(result.posts().get(0).isOwner()).isTrue();
+			verify(postReader, times(1)).findPostsWrittenByUserWithCursor(
+				eq("viewer-id"), isNull(), isNull(), eq(20));
+		}
+
+		@DisplayName("작성한 게시글 목록 — 차단 사용자 필터링 없이 조회 (본인 게시글)")
+		@Test
+		void getPostsWrittenByUser_shouldNotFilterBlockedUsers() {
+			// given
+			PostCursorResult postCursorResult = createSamplePostCursorResult("post-1", boardId, "테스트 게시판");
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(postCursorResult), PageRequest.of(0, 20), false);
+
+			given(postReader.findPostsWrittenByUserWithCursor(
+				eq("viewer-id"), isNull(), isNull(), eq(20)))
+				.willReturn(slice);
+			stubBatchFetchers();
+
+			// when
+			postService.getPostsWrittenByUser(viewer, null, 20);
+
+			// then — 차단 조회가 호출되지 않음을 검증
+			verify(blockReader, never()).findBlockeeUserIdsByBlocker(any());
+		}
+
+		@DisplayName("작성한 게시글 목록 — 커서 기반 페이징 및 다음 커서 반환")
+		@Test
+		void getPostsWrittenByUser_shouldSupportCursorPaging() {
+			// given
+			PostCursorResult postCursorResult = createSamplePostCursorResult("post-2", boardId, "테스트 게시판");
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(postCursorResult), PageRequest.of(0, 20), true);
+
+			String cursor = "2024-06-01T12:00:00|post-1";
+			given(postReader.findPostsWrittenByUserWithCursor(
+				eq("viewer-id"), eq("2024-06-01T12:00:00"), eq("post-1"), eq(10)))
+				.willReturn(slice);
+			stubBatchFetchers();
+
+			// when
+			PostListResult result = postService.getPostsWrittenByUser(viewer, cursor, 10);
+
+			// then
+			assertAll(
+				() -> assertThat(result.posts()).hasSize(1),
+				() -> assertThat(result.nextCursor()).isNotNull(),
+				() -> assertThat(result.nextCursor()).contains("post-2"));
+		}
+
+		@DisplayName("작성한 게시글 목록 — 빈 결과 반환")
+		@Test
+		void getPostsWrittenByUser_shouldReturnEmpty_whenNoPosts() {
+			// given
+			given(postReader.findPostsWrittenByUserWithCursor(
+				eq("viewer-id"), isNull(), isNull(), eq(20)))
+				.willReturn(new SliceImpl<>(List.of(), PageRequest.of(0, 20), false));
+
+			// when
+			PostListResult result = postService.getPostsWrittenByUser(viewer, null, 20);
+
+			// then
+			assertAll(
+				() -> assertThat(result.posts()).isEmpty(),
+				() -> assertThat(result.nextCursor()).isNull());
+		}
+	}
+
+	@Nested
+	@DisplayName("사용자가 좋아요 누른 게시글 목록 조회 테스트")
+	class GetPostsLikedByUserTest {
+
+		User viewer;
+		String boardId;
+		BoardConfig boardConfig;
+
+		@BeforeEach
+		void setUp() {
+			viewer = ObjectFixtures.getCertifiedUserWithId("viewer-id");
+			boardId = "board-id";
+			boardConfig = BoardConfig.of(
+				boardId, false, BoardReadScope.BOTH, BoardWriteScope.ALL_USER,
+				false, BoardVisibility.VISIBLE, 10, null, null);
+			Mockito.lenient().when(blockReader.findBlockeeUserIdsByBlocker(viewer)).thenReturn(Set.of());
+			Mockito.lenient().when(boardConfigReader.getBoardConfigMapByBoardIds(anyList()))
+				.thenReturn(Map.of(boardId, boardConfig));
+		}
+
+		@DisplayName("좋아요 누른 게시글 목록 조회 성공 — getPosts와 동일한 PostItem 구조 반환")
+		@Test
+		void getPostsLikedByUser_shouldReturnSameStructureAsGetPosts() {
+			// given
+			PostCursorResult postCursorResult = createSamplePostCursorResult("post-1", boardId, "테스트 게시판");
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(postCursorResult), PageRequest.of(0, 20), false);
+
+			given(postReader.findPostsLikedByUserWithCursor(
+				eq("viewer-id"), anySet(), isNull(), isNull(), eq(20)))
+				.willReturn(slice);
+			stubBatchFetchers();
+
+			// when
+			PostListResult result = postService.getPostsLikedByUser(viewer, null, 20);
+
+			// then
+			assertPostListStructure(result, "post-1", boardId);
+			verify(postReader, times(1)).findPostsLikedByUserWithCursor(
+				eq("viewer-id"), anySet(), isNull(), isNull(), eq(20));
+		}
+
+		@DisplayName("좋아요 누른 게시글 목록 — 차단한 사용자의 게시글 제외")
+		@Test
+		void getPostsLikedByUser_shouldExcludeBlockedUsers() {
+			// given
+			Set<String> blockedUserIds = Set.of("blocked-writer-id");
+			given(blockReader.findBlockeeUserIdsByBlocker(viewer)).willReturn(blockedUserIds);
+			given(postReader.findPostsLikedByUserWithCursor(
+				eq("viewer-id"), eq(blockedUserIds), isNull(), isNull(), eq(20)))
+				.willReturn(new SliceImpl<>(List.of(), PageRequest.of(0, 20), false));
+
+			// when
+			PostListResult result = postService.getPostsLikedByUser(viewer, null, 20);
+
+			// then
+			assertThat(result.posts()).isEmpty();
+			verify(postReader, times(1)).findPostsLikedByUserWithCursor(
+				eq("viewer-id"), eq(blockedUserIds), isNull(), isNull(), eq(20));
+		}
+
+		@DisplayName("좋아요 누른 게시글 목록 — 좋아요 상태(isPostLike)가 true로 표시")
+		@Test
+		void getPostsLikedByUser_shouldMarkLikedPostAsTrue() {
+			// given
+			PostCursorResult postCursorResult = createSamplePostCursorResult("post-1", boardId, "테스트 게시판");
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(postCursorResult), PageRequest.of(0, 20), false);
+
+			given(postReader.findPostsLikedByUserWithCursor(
+				eq("viewer-id"), anySet(), isNull(), isNull(), eq(20)))
+				.willReturn(slice);
+			given(postReader.findPostImagesByPostIds(anyList())).willReturn(Map.of("post-1", List.of("img-url")));
+			given(likePostReader.getLikedPostIds(eq("viewer-id"), anyList())).willReturn(Set.of("post-1"));
+			given(postReader.findAdminUserIds(anyList())).willReturn(Set.of());
+
+			// when
+			PostListResult result = postService.getPostsLikedByUser(viewer, null, 20);
+
+			// then
+			assertAll(
+				() -> assertThat(result.posts()).hasSize(1),
+				() -> assertThat(result.posts().get(0).isPostLike()).isTrue(),
+				() -> assertThat(result.posts().get(0).postImageUrls()).containsExactly("img-url"));
+		}
+
+		@DisplayName("좋아요 누른 게시글 목록 — 커서 기반 페이징 및 다음 커서 반환")
+		@Test
+		void getPostsLikedByUser_shouldSupportCursorPaging() {
+			// given
+			PostCursorResult postCursorResult = createSamplePostCursorResult("post-2", boardId, "테스트 게시판");
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(postCursorResult), PageRequest.of(0, 20), true);
+
+			String cursor = "2024-06-01T12:00:00|post-1";
+			given(postReader.findPostsLikedByUserWithCursor(
+				eq("viewer-id"), anySet(), eq("2024-06-01T12:00:00"), eq("post-1"), eq(10)))
+				.willReturn(slice);
+			stubBatchFetchers();
+
+			// when
+			PostListResult result = postService.getPostsLikedByUser(viewer, cursor, 10);
+
+			// then
+			assertAll(
+				() -> assertThat(result.posts()).hasSize(1),
+				() -> assertThat(result.nextCursor()).isNotNull(),
+				() -> assertThat(result.nextCursor()).contains("post-2"));
+		}
+
+		@DisplayName("좋아요 누른 게시글 목록 — 익명 게시글 작성자 정보 보호")
+		@Test
+		void getPostsLikedByUser_shouldMaskAnonymousWriter() {
+			// given
+			PostCursorResult anonymousPost = createAnonymousPostCursorResult("post-anon", boardId);
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(anonymousPost), PageRequest.of(0, 20), false);
+
+			given(postReader.findPostsLikedByUserWithCursor(
+				eq("viewer-id"), anySet(), isNull(), isNull(), eq(20)))
+				.willReturn(slice);
+			stubBatchFetchers();
+
+			// when
+			PostListResult result = postService.getPostsLikedByUser(viewer, null, 20);
+
+			// then
+			assertAnonymousPostItem(result);
+		}
+
+		@DisplayName("좋아요 누른 게시글 목록 — 빈 결과 반환")
+		@Test
+		void getPostsLikedByUser_shouldReturnEmpty_whenNoPosts() {
+			// given
+			given(postReader.findPostsLikedByUserWithCursor(
+				eq("viewer-id"), anySet(), isNull(), isNull(), eq(20)))
+				.willReturn(new SliceImpl<>(List.of(), PageRequest.of(0, 20), false));
+
+			// when
+			PostListResult result = postService.getPostsLikedByUser(viewer, null, 20);
+
+			// then
+			assertAll(
+				() -> assertThat(result.posts()).isEmpty(),
+				() -> assertThat(result.nextCursor()).isNull());
+		}
+	}
+
+	@Nested
+	@DisplayName("게시글 목록 구조 일관성 테스트")
+	class PostListStructureConsistencyTest {
+
+		User viewer;
+		String boardId;
+		BoardConfig boardConfig;
+
+		@BeforeEach
+		void setUp() {
+			viewer = ObjectFixtures.getCertifiedUserWithId("viewer-id");
+			boardId = "board-id";
+			boardConfig = BoardConfig.of(
+				boardId, false, BoardReadScope.BOTH, BoardWriteScope.ALL_USER,
+				false, BoardVisibility.VISIBLE, 10, null, null);
+			Mockito.lenient().when(blockReader.findBlockeeUserIdsByBlocker(viewer)).thenReturn(Set.of());
+			Mockito.lenient().when(boardConfigReader.getBoardConfigMapByBoardIds(anyList()))
+				.thenReturn(Map.of(boardId, boardConfig));
+		}
+
+		@DisplayName("네 가지 목록 조회 메서드가 동일한 PostItem 필드를 채운다")
+		@Test
+		void allFourListMethods_shouldPopulateIdenticalPostItemFields() {
+			// given — 동일한 PostCursorResult를 네 메서드 모두에 주입
+			PostCursorResult postCursorResult = new PostCursorResult(
+				"post-consistency",
+				"구조 일관성 테스트 내용",
+				7L,
+				15L,
+				4L,
+				false,
+				"vote-1",
+				false,
+				false,
+				true,
+				"writer-id",
+				"작성자",
+				"실제닉네임",
+				2020,
+				UserState.ACTIVE,
+				ProfileImageType.CUSTOM,
+				"profile-url",
+				LocalDateTime.of(2024, 3, 15, 10, 30),
+				LocalDateTime.of(2024, 3, 15, 11, 0),
+				boardId,
+				"테스트 게시판");
+
+			List<String> imageUrls = List.of("https://img.example.com/1.jpg", "https://img.example.com/2.jpg");
+			Slice<PostCursorResult> slice = new SliceImpl<>(
+				List.of(postCursorResult), PageRequest.of(0, 20), true);
+
+			// 1) getPosts 결과
+			PostListQuery query = PostListQuery.of(viewer, List.of(boardId), null, 20, null);
+			List<String> boardAdminIds = List.of("admin-id");
+			given(boardConfigReader.getByBoardId(boardId)).willReturn(boardConfig);
+			given(boardConfigReader.getAdminIdsByBoardId(boardId)).willReturn(boardAdminIds);
+			given(postReader.findPostsWithCursor(anyList(), anySet(), isNull(), isNull(), eq(20), isNull()))
+				.willReturn(slice);
+			given(postReader.findPostImagesByPostIds(anyList())).willReturn(Map.of("post-consistency", imageUrls));
+			given(likePostReader.getLikedPostIds(eq("viewer-id"), anyList())).willReturn(Set.of("post-consistency"));
+			given(postReader.findAdminUserIds(anyList())).willReturn(Set.of("writer-id"));
+
+			PostListResult getPostsResult = postService.getPosts(query);
+
+			// 2) getPostsCommentedByUser 결과
+			given(postReader.findPostsCommentedByUserWithCursor(
+				eq("viewer-id"), anySet(), isNull(), isNull(), eq(20)))
+				.willReturn(slice);
+
+			PostListResult commentedResult = postService.getPostsCommentedByUser(viewer, null, 20);
+
+			// 3) getPostsWrittenByUser 결과
+			given(postReader.findPostsWrittenByUserWithCursor(
+				eq("viewer-id"), isNull(), isNull(), eq(20)))
+				.willReturn(slice);
+
+			PostListResult writtenResult = postService.getPostsWrittenByUser(viewer, null, 20);
+
+			// 4) getPostsLikedByUser 결과
+			given(postReader.findPostsLikedByUserWithCursor(
+				eq("viewer-id"), anySet(), isNull(), isNull(), eq(20)))
+				.willReturn(slice);
+
+			PostListResult likedResult = postService.getPostsLikedByUser(viewer, null, 20);
+
+			// then — 네 결과 모두 동일한 구조의 PostItem을 반환
+			List<PostListResult> allResults = List.of(getPostsResult, commentedResult, writtenResult, likedResult);
+
+			for (PostListResult result : allResults) {
+				assertAll("PostItem 구조 일관성 검증",
+					() -> assertThat(result.posts()).hasSize(1),
+					() -> assertThat(result.nextCursor()).isNotNull());
+
+				PostListResult.PostItem item = result.posts().get(0);
+				assertAll(
+					() -> assertThat(item.postId()).isEqualTo("post-consistency"),
+					() -> assertThat(item.content()).isEqualTo("구조 일관성 테스트 내용"),
+					() -> assertThat(item.numComment()).isEqualTo(7L),
+					() -> assertThat(item.numLike()).isEqualTo(15L),
+					() -> assertThat(item.numFavorite()).isEqualTo(4L),
+					() -> assertThat(item.isAnonymous()).isFalse(),
+					() -> assertThat(item.voteId()).isEqualTo("vote-1"),
+					() -> assertThat(item.isDeleted()).isFalse(),
+					() -> assertThat(item.isCrawled()).isFalse(),
+					() -> assertThat(item.writerNickname()).isEqualTo("실제닉네임"),
+					() -> assertThat(item.writerProfileImage().profileImageType()).isEqualTo(ProfileImageType.CUSTOM),
+					() -> assertThat(item.writerProfileImage().profileImageUrl()).isEqualTo("profile-url"),
+					() -> assertThat(item.createdAt()).isEqualTo(LocalDateTime.of(2024, 3, 15, 10, 30)),
+					() -> assertThat(item.updatedAt()).isEqualTo(LocalDateTime.of(2024, 3, 15, 11, 0)),
+					() -> assertThat(item.postImageUrls()).containsExactlyElementsOf(imageUrls),
+					() -> assertThat(item.boardId()).isEqualTo(boardId),
+					() -> assertThat(item.boardName()).isEqualTo("테스트 게시판"),
+					() -> assertThat(item.isPostLike()).isTrue(),
+					() -> assertThat(item.isOfficial()).isTrue()  // writer가 ADMIN이므로 공식 배지
+				);
+			}
+		}
+	}
+
+	// ── 테스트 헬퍼 메서드 ────────────────────────────────────────────────────────────
+
+	/**
+	 * 일반적인 PostCursorResult를 생성합니다.
+	 */
+	private PostCursorResult createSamplePostCursorResult(String postId, String boardId, String boardName) {
+		return new PostCursorResult(
+			postId,
+			"테스트 게시글 내용",
+			5L,
+			10L,
+			3L,
+			false,
+			null,
+			false,
+			false,
+			true,
+			"other-writer-id",
+			"작성자",
+			"닉네임",
+			2020,
+			UserState.ACTIVE,
+			ProfileImageType.CUSTOM,
+			"profile-url",
+			LocalDateTime.now(),
+			LocalDateTime.now(),
+			boardId,
+			boardName);
+	}
+
+	/**
+	 * 익명 PostCursorResult를 생성합니다.
+	 */
+	private PostCursorResult createAnonymousPostCursorResult(String postId, String boardId) {
+		return new PostCursorResult(
+			postId,
+			"익명 게시글 내용",
+			2L,
+			5L,
+			1L,
+			true,
+			null,
+			false,
+			false,
+			true,
+			"anon-writer-id",
+			"작성자",
+			"닉네임",
+			2020,
+			UserState.ACTIVE,
+			ProfileImageType.CUSTOM,
+			"profile-url",
+			LocalDateTime.now(),
+			LocalDateTime.now(),
+			boardId,
+			"테스트 게시판");
+	}
+
+	/**
+	 * assemblePostListResult가 사용하는 배치 조회 의존성을 스텁합니다.
+	 */
+	private void stubBatchFetchers() {
+		given(postReader.findPostImagesByPostIds(anyList())).willReturn(Map.of());
+		given(likePostReader.getLikedPostIds(anyString(), anyList())).willReturn(Set.of());
+		given(postReader.findAdminUserIds(anyList())).willReturn(Set.of());
+	}
+
+	/**
+	 * PostListResult의 기본 구조를 검증합니다.
+	 */
+	private void assertPostListStructure(PostListResult result, String expectedPostId, String expectedBoardId) {
+		assertAll(
+			() -> assertThat(result).isNotNull(),
+			() -> assertThat(result.posts()).hasSize(1),
+			() -> assertThat(result.posts().get(0).postId()).isEqualTo(expectedPostId),
+			() -> assertThat(result.posts().get(0).boardId()).isEqualTo(expectedBoardId),
+			() -> assertThat(result.posts().get(0).boardName()).isNotNull(),
+			() -> assertThat(result.posts().get(0).writerNickname()).isNotNull(),
+			() -> assertThat(result.posts().get(0).writerProfileImage()).isNotNull(),
+			() -> assertThat(result.posts().get(0).postImageUrls()).isNotNull(),
+			() -> assertThat(result.posts().get(0).createdAt()).isNotNull(),
+			() -> assertThat(result.nextCursor()).isNull());
+	}
+
+	/**
+	 * 익명 게시글의 PostItem 마스킹을 검증합니다.
+	 */
+	private void assertAnonymousPostItem(PostListResult result) {
+		PostListResult.PostItem item = result.posts().get(0);
+		assertAll(
+			() -> assertThat(item.isAnonymous()).isTrue(),
+			() -> assertThat(item.writerNickname()).isEqualTo("익명"),
+			() -> assertThat(item.writerProfileImage().profileImageType()).isEqualTo(ProfileImageType.GHOST),
+			() -> assertThat(item.writerProfileImage().profileImageUrl()).isNull());
 	}
 }

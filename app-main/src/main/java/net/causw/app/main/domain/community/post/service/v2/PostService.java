@@ -205,46 +205,7 @@ public class PostService {
 			size,
 			keyword);
 
-		// Slice에서 content와 hasNext 추출
-		List<PostCursorResult> posts = slice.getContent();
-		boolean hasNext = slice.hasNext();
-
-		// 다음 커서 생성
-		String nextCursor = null;
-		if (hasNext && !posts.isEmpty()) {
-			PostCursorResult lastPost = posts.get(posts.size() - 1);
-			nextCursor = PostCursorManager.createNextCursor(lastPost.createdAt(), lastPost.postId());
-		}
-
-		// 게시글 이미지 조회
-		List<String> postIds = posts.stream().map(PostCursorResult::postId).toList();
-		Map<String, List<String>> postImagesMap = postIds.isEmpty()
-			? Map.of()
-			: postReader.findPostImagesByPostIds(postIds);
-
-		// 좋아요 여부 배치 조회
-		Set<String> likedPostIds = postIds.isEmpty()
-			? Set.of()
-			: likePostReader.getLikedPostIds(viewer.getId(), postIds);
-
-		// 게시판 설정 배치 조회
-		List<String> uniqueBoardIds = posts.stream().map(PostCursorResult::boardId).filter(Objects::nonNull)
-			.distinct().toList();
-		Map<String, BoardConfig> boardConfigMap = boardConfigReader.getBoardConfigMapByBoardIds(uniqueBoardIds);
-
-		// 작성자 중 Role이 ADMIN인 사용자 ID 조회 (시스템 관리자 판별용)
-		List<String> writerIds = posts.stream()
-			.map(PostCursorResult::writerId)
-			.filter(Objects::nonNull)
-			.distinct()
-			.toList();
-		Set<String> adminWriterIds = postReader.findAdminUserIds(writerIds);
-
-		// PostListResult로 변환 (PostMapper 사용)
-		List<PostListResult.PostItem> postItems = buildPostItems(posts, postImagesMap, likedPostIds, viewer,
-			boardConfigMap, adminWriterIds);
-
-		return PostListResult.of(postItems, nextCursor);
+		return assemblePostListResult(slice, viewer);
 	}
 
 	/**
@@ -353,7 +314,7 @@ public class PostService {
 			parsedCursor.postId(),
 			pageSize);
 
-		return getPostListResult(slice, user);
+		return assemblePostListResult(slice, user);
 	}
 
 	/**
@@ -374,7 +335,7 @@ public class PostService {
 			parsedCursor.postId(),
 			pageSize);
 
-		return getPostListResult(slice, user);
+		return assemblePostListResult(slice, user);
 	}
 
 	/**
@@ -396,11 +357,23 @@ public class PostService {
 			parsedCursor.postId(),
 			pageSize);
 
-		return getPostListResult(slice, user);
+		return assemblePostListResult(slice, user);
 	}
 
+	/**
+	 * 네 가지 게시글 목록 조회(getPosts, getPostsCommentedByUser, getPostsWrittenByUser, getPostsLikedByUser)에서
+	 * 공통으로 사용하는 게시글 목록 조립 로직입니다.
+	 * <p>
+	 * Slice에서 추출한 PostCursorResult 목록을 기반으로 이미지, 좋아요 여부, 게시판 설정, 공식계정 정보를
+	 * 일괄 조회한 뒤, 통일된 필드 채움 규칙으로 PostItem 리스트를 생성하고 다음 커서와 함께 반환합니다.
+	 * </p>
+	 *
+	 * @param slice  커서 기반 페이징으로 조회한 PostCursorResult Slice
+	 * @param viewer 조회 요청 사용자 (좋아요 여부, 소유자 여부 판단에 사용)
+	 * @return PostListResult (게시글 목록 + 다음 커서)
+	 */
 	@NotNull
-	private PostListResult getPostListResult(Slice<PostCursorResult> slice, User viewer) {
+	private PostListResult assemblePostListResult(Slice<PostCursorResult> slice, User viewer) {
 		List<PostCursorResult> posts = slice.getContent();
 		if (posts.isEmpty()) {
 			return PostListResult.of(List.of(), null);
