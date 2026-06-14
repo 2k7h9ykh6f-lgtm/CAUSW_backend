@@ -40,12 +40,14 @@ public class ScheduleController {
 		"1) 쉼표 구분: ?types=ACADEMIC,CLUB,EXAM <br>" +
 		"2) 반복: ?types=ACADEMIC&types=CLUB&types=EXAM <br>" +
 		"3) 생략: 모든 타입 조회 <br><br>" +
-		"※ 연결된 게시물(targetPostId)에 대한 읽기 권한이 없는 경우 null로 반환됩니다.")
+		"readableOnly=true로 설정하면 연결된 게시물에 읽기 권한이 없는 일정은 결과에서 제외됩니다. <br>" +
+		"(기본값: false — 읽기 권한이 없는 경우 targetPostId만 null로 마스킹되고 일정 자체는 포함됩니다.)")
 	@GetMapping
 	public ApiResponse<ScheduleListResponse> readSchedules(
 		@RequestParam(required = false) LocalDateTime from,
 		@RequestParam(required = false) LocalDateTime to,
 		@RequestParam(required = false) Set<ScheduleType> types,
+		@RequestParam(required = false, defaultValue = "false") Boolean readableOnly,
 		@AuthenticationPrincipal CustomUserDetails customUserDetails) {
 
 		LocalDateTime startDate = from;
@@ -60,7 +62,7 @@ public class ScheduleController {
 
 		return ApiResponse.success(
 			scheduleDtoMapper.toScheduleListResponse(
-				scheduleService.findByConditionWithMasking(startDate, endDate, types, viewer)));
+				scheduleService.findByConditionWithMasking(startDate, endDate, types, viewer, readableOnly)));
 	}
 
 	@Operation(summary = "일정 단건 조회", description = "특정 ID의 일정을 조회합니다. <br>" +

@@ -12,7 +12,6 @@ import static org.mockito.BDDMockito.verify;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -357,6 +356,161 @@ public class ScheduleServiceTest {
 			verify(scheduleReader).findById(scheduleId);
 			verify(scheduleMaskingResolver).resolveReadablePostIds(anyList(), eq(viewer));
 			verify(scheduleMaskingResolver).maskIfUnreadable(any(ScheduleDto.class), any());
+		}
+	}
+
+	@Nested
+	@DisplayName("readableOnly 필터 테스트")
+	class ReadableOnlyFilterTest {
+
+		private LocalDateTime from;
+		private LocalDateTime to;
+
+		@BeforeEach
+		void setUp() {
+			from = LocalDateTime.of(2026, 4, 1, 0, 0);
+			to = LocalDateTime.of(2026, 4, 30, 23, 59);
+		}
+
+		/**
+		 * maskIfUnreadable mock: readablePostIds에 포함되면 원본 반환, 아니면 targetPostId=null로 마스킹.
+		 */
+		private void setupMaskingMock(Set<String> readablePostIds) {
+			given(scheduleMaskingResolver.resolveReadablePostIds(anyList(), any())).willReturn(readablePostIds);
+			given(scheduleMaskingResolver.maskIfUnreadable(any(ScheduleDto.class), any()))
+				.willAnswer(inv -> {
+					ScheduleDto dto = inv.getArgument(0);
+					if (dto.targetPostId() == null || readablePostIds.contains(dto.targetPostId())) {
+						return dto;
+					}
+					return ScheduleMapper.toWithoutTargetPost(dto);
+				});
+		}
+
+		@Test
+		@DisplayName("readableOnly=true + 익명 사용자: 연결 게시물이 없는 일정만 반환된다")
+		void anonymousUser_keepsOnlySchedulesWithoutLinkedPost() {
+			// given: 일정 1은 연결 게시물 있음, 일정 2는 없음
+			Schedule withPost = Schedule.of(
+				"공지", ScheduleType.ACADEMIC,
+				LocalDateTime.of(2026, 4, 10, 0, 0),
+				LocalDateTime.of(2026, 4, 12, 23, 59),
+				mockUser, "post-1");
+			Schedule withoutPost = Schedule.of(
+				"일반일정", ScheduleType.DEPARTMENT,
+				LocalDateTime.of(2026, 4, 15, 0, 0),
+				LocalDateTime.of(2026, 4, 17, 23, 59),
+				mockUser, null);
+			given(scheduleReader.findByCondition(from, to, null)).willReturn(List.of(withPost, withoutPost));
+
+			// viewer=null → readablePostIds=빈 집합 → post-1은 마스킹됨
+			setupMaskingMock(Set.of());
+
+			// when
+			List<ScheduleDto> result = scheduleService.findByConditionWithMasking(from, to, null, null, true);
+
+			// then: 연결 게시물이 없던 일정만 남음
+			assertThat(result).hasSize(1);
+			assertThat(result.get(0).title()).isEqualTo("일반일정");
+			assertThat(result.get(0).targetPostId()).isNull();
+		}
+
+		@Test
+		@DisplayName("readableOnly=true + 부분 권한: 읽기 가능한 게시물 일정 + 연결 없는 일정만 반환된다")
+		void partialPermissions_keepsReadableAndNoPost() {
+			// given: 일정 1은 읽기 가능, 일정 2는 읽기 불가, 일정 3은 연결 없음
+			User viewer = ObjectFixtures.getCertifiedUserWithId("viewer-id");
+			Schedule readablePostSchedule = Schedule.of(
+				"readable공지", ScheduleType.ACADEMIC,
+				LocalDateTime.of(2026, 4, 10, 0, 0),
+				LocalDateTime.of(2026, 4, 12, 23, 59),
+				mockUser, "post-readable");
+			Schedule unreadablePostSchedule = Schedule.of(
+				"제한공지", ScheduleType.STUDENT_COUNCIL,
+				LocalDateTime.of(2026, 4, 13, 0, 0),
+				LocalDateTime.of(2026, 4, 14, 23, 59),
+				mockUser, "post-unreadable");
+			Schedule noPostSchedule = Schedule.of(
+				"일반일정", ScheduleType.DEPARTMENT,
+				LocalDateTime.of(2026, 4, 15, 0, 0),
+				LocalDateTime.of(2026, 4, 17, 23, 59),
+				mockUser, null);
+			given(scheduleReader.findByCondition(from, to, null))
+				.willReturn(List.of(readablePostSchedule, unreadablePostSchedule, noPostSchedule));
+
+			setupMaskingMock(Set.of("post-readable"));
+
+			// when
+			List<ScheduleDto> result = scheduleService.findByConditionWithMasking(from, to, null, viewer, true);
+
+			// then: 읽기 가능한 일정 + 연결 없는 일정 = 2개
+			assertThat(result).hasSize(2);
+			assertThat(result).extracting(ScheduleDto::title)
+				.containsExactly("readable공지", "일반일정");
+			// 읽기 가능한 일정은 targetPostId가 유지됨
+			assertThat(result.stream().filter(d -> "readable공지".equals(d.title())).findFirst().get().targetPostId())
+				.isEqualTo("post-readable");
+			// 연결 없는 일정은 targetPostId가 원래 null
+			assertThat(result.stream().filter(d -> "일반일정".equals(d.title())).findFirst().get().targetPostId())
+				.isNull();
+		}
+
+		@Test
+		@DisplayName("readableOnly=false: 모든 일정이 반환되고 읽기 불가 게시물의 targetPostId만 마스킹된다")
+		void readableOnlyFalse_keepsAllSchedulesWithMasking() {
+			// given: 일정 1은 읽기 불가 게시물, 일정 2는 연결 없음
+			User viewer = ObjectFixtures.getCertifiedUserWithId("viewer-id");
+			Schedule unreadableSchedule = Schedule.of(
+				"제한공지", ScheduleType.ACADEMIC,
+				LocalDateTime.of(2026, 4, 10, 0, 0),
+				LocalDateTime.of(2026, 4, 12, 23, 59),
+				mockUser, "post-unreadable");
+			Schedule noPostSchedule = Schedule.of(
+				"일반일정", ScheduleType.DEPARTMENT,
+				LocalDateTime.of(2026, 4, 15, 0, 0),
+				LocalDateTime.of(2026, 4, 17, 23, 59),
+				mockUser, null);
+			given(scheduleReader.findByCondition(from, to, null))
+				.willReturn(List.of(unreadableSchedule, noPostSchedule));
+
+			setupMaskingMock(Set.of());
+
+			// when
+			List<ScheduleDto> result = scheduleService.findByConditionWithMasking(from, to, null, viewer, false);
+
+			// then: 모든 일정이 반환됨 (기존 동작과 동일)
+			assertThat(result).hasSize(2);
+			// 읽기 불가 게시물의 targetPostId는 마스킹됨
+			assertThat(result.stream().filter(d -> "제한공지".equals(d.title())).findFirst().get().targetPostId())
+				.isNull();
+			// 연결 없는 일정은 그대로
+			assertThat(result.stream().filter(d -> "일반일정".equals(d.title())).findFirst().get().targetPostId())
+				.isNull();
+		}
+
+		@Test
+		@DisplayName("4인자 메서드는 readableOnly=false와 동일한 동작을 한다 (기본값 호환)")
+		void fourArgMethod_delegatesWithReadableOnlyFalse() {
+			// given
+			Schedule schedule1 = Schedule.of(
+				"일정1", ScheduleType.ACADEMIC,
+				LocalDateTime.of(2026, 4, 10, 0, 0),
+				LocalDateTime.of(2026, 4, 12, 23, 59),
+				mockUser, "post-1");
+			Schedule schedule2 = Schedule.of(
+				"일정2", ScheduleType.DEPARTMENT,
+				LocalDateTime.of(2026, 4, 15, 0, 0),
+				LocalDateTime.of(2026, 4, 17, 23, 59),
+				mockUser, null);
+			given(scheduleReader.findByCondition(from, to, null)).willReturn(List.of(schedule1, schedule2));
+			setupMaskingMock(Set.of());
+
+			// when: 4인자 메서드 호출 (readableOnly 파라미터 없음)
+			List<ScheduleDto> result = scheduleService.findByConditionWithMasking(from, to, null, null);
+
+			// then: readableOnly=false와 동일 — 모든 일정 반환
+			assertThat(result).hasSize(2);
+			verify(scheduleMaskingResolver).resolveReadablePostIds(anyList(), any());
 		}
 	}
 }

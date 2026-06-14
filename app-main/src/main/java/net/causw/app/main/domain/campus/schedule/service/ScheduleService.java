@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -65,13 +66,44 @@ public class ScheduleService {
 	@Transactional(readOnly = true)
 	public List<ScheduleDto> findByConditionWithMasking(LocalDateTime from, LocalDateTime to,
 		Collection<ScheduleType> types, User viewer) {
+		return findByConditionWithMasking(from, to, types, viewer, false);
+	}
+
+	/**
+	 * 조건에 따라 일정을 조회하고, 연결된 게시물(targetPostId)에 대한 읽기 권한이 없는 경우 null로 마스킹합니다.
+	 * readableOnly가 true이면, 연결된 게시물이 있고 읽기 권한이 없는 일정을 결과에서 제외합니다.
+	 *
+	 * @param from         시작 일시
+	 * @param to           종료 일시
+	 * @param types        일정 유형 필터
+	 * @param viewer       현재 요청 사용자 (null이면 모두 마스킹)
+	 * @param readableOnly true이면 읽기 권한이 없는 연결 게시물이 있는 일정을 제외
+	 * @return targetPostId가 권한에 따라 마스킹된 일정 목록 (readableOnly 적용 시 불가 일정 제외)
+	 */
+	@Transactional(readOnly = true)
+	public List<ScheduleDto> findByConditionWithMasking(LocalDateTime from, LocalDateTime to,
+		Collection<ScheduleType> types, User viewer, boolean readableOnly) {
 		List<ScheduleDto> scheduleDtos = scheduleReader.findByCondition(from, to, types).stream()
 			.map(ScheduleMapper::to)
 			.toList();
 		Set<String> readablePostIds = scheduleMaskingResolver.resolveReadablePostIds(scheduleDtos, viewer);
 
-		return scheduleDtos.stream()
+		List<ScheduleDto> maskedDtos = scheduleDtos.stream()
 			.map(dto -> scheduleMaskingResolver.maskIfUnreadable(dto, readablePostIds))
+			.toList();
+
+		if (!readableOnly) {
+			return maskedDtos;
+		}
+
+		// readableOnly: 원본 targetPostId가 null이거나 읽기 가능한 경우만 포함
+		return IntStream.range(0, scheduleDtos.size())
+			.filter(i -> {
+				ScheduleDto original = scheduleDtos.get(i);
+				ScheduleDto masked = maskedDtos.get(i);
+				return original.targetPostId() == null || masked.targetPostId() != null;
+			})
+			.mapToObj(maskedDtos::get)
 			.toList();
 	}
 
