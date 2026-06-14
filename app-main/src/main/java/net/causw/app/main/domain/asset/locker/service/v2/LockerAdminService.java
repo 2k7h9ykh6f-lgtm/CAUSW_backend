@@ -1,6 +1,8 @@
 package net.causw.app.main.domain.asset.locker.service.v2;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -11,6 +13,8 @@ import net.causw.app.main.domain.asset.locker.entity.Locker;
 import net.causw.app.main.domain.asset.locker.entity.LockerLog;
 import net.causw.app.main.domain.asset.locker.service.v2.dto.LockerListCondition;
 import net.causw.app.main.domain.asset.locker.service.v2.dto.LockerLogListCondition;
+import net.causw.app.main.domain.asset.locker.service.v2.dto.result.ExpiredLockerReleaseResult;
+import net.causw.app.main.domain.asset.locker.service.v2.dto.result.ExpiredLockerReleaseResult.ReleasedLockerInfo;
 import net.causw.app.main.domain.asset.locker.service.v2.implementation.LockerLogReader;
 import net.causw.app.main.domain.asset.locker.service.v2.implementation.LockerReader;
 import net.causw.app.main.domain.asset.locker.service.v2.implementation.LockerValidator;
@@ -166,15 +170,36 @@ public class LockerAdminService {
 		lockerWriter.disableLocker(locker, admin);
 	}
 
+	/**
+	 * 만료된 사물함 일괄 회수.
+	 *
+	 * <p>현재 시각 기준으로 만료된 모든 사물함을 회수하고,
+	 * 회수 결과를 요약하여 반환한다.</p>
+	 *
+	 * @param adminId 관리자 아이디
+	 * @return 회수 처리 결과 (회수된 사물함 수 및 상세 정보)
+	 */
 	@Transactional
-	public void releaseExpiredLocker(String adminId) {
+	public ExpiredLockerReleaseResult releaseExpiredLocker(String adminId) {
 		User admin = userReader.findAdminUserById(adminId);
 
 		var expiredLockers = lockerReader.findExpiredLockers(LocalDateTime.now());
+		if (expiredLockers.isEmpty()) {
+			return ExpiredLockerReleaseResult.empty();
+		}
+
+		List<ReleasedLockerInfo> releasedInfos = new ArrayList<>();
 		expiredLockers.forEach(locker -> {
 			var userEmail = locker.getUser().map(User::getEmail).orElse("알 수 없음");
 			var userName = locker.getUser().map(User::getName).orElse("알 수 없음");
 			lockerWriter.releaseLocker(locker, admin, userEmail, userName);
+			releasedInfos.add(ReleasedLockerInfo.builder()
+				.lockerId(locker.getId())
+				.lockerNumber(locker.getLockerNumber())
+				.locationName(locker.getLocation().getName())
+				.build());
 		});
+
+		return ExpiredLockerReleaseResult.of(releasedInfos);
 	}
 }

@@ -1,5 +1,7 @@
 package net.causw.app.main.domain.asset.locker.api.v2.controller.admin;
 
+import java.util.List;
+
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -16,10 +18,13 @@ import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.reques
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.request.LockerExtendRequest;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.request.LockerListRequest;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.request.LockerLogListRequest;
+import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.response.ExpiredLockerReleaseResponse;
+import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.response.ExpiredLockerReleaseResponse.ReleasedLockerItem;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.response.LockerListItemResponse;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.dto.response.LockerLogListItemResponse;
 import net.causw.app.main.domain.asset.locker.api.v2.controller.admin.mapper.LockerListMapper;
 import net.causw.app.main.domain.asset.locker.service.v2.LockerAdminService;
+import net.causw.app.main.domain.asset.locker.service.v2.dto.result.ExpiredLockerReleaseResult;
 import net.causw.app.main.domain.user.auth.userdetails.CustomUserDetails;
 import net.causw.app.main.shared.dto.ApiResponse;
 import net.causw.app.main.shared.dto.PageResponse;
@@ -78,11 +83,17 @@ public class LockerAdminController {
 
 	@PostMapping("/release-all-expired")
 	@Operation(summary = "만료된 사물함 일괄 회수", description = "만료된 사물함을 일괄 회수합니다.")
-	public ApiResponse<Void> releaseExpiredLocker(
+	public ApiResponse<ExpiredLockerReleaseResponse> releaseExpiredLocker(
 		@AuthenticationPrincipal CustomUserDetails userDetails) {
 
-		lockerAdminService.releaseExpiredLocker(userDetails.getUserId());
-		return ApiResponse.success();
+		ExpiredLockerReleaseResult result = lockerAdminService.releaseExpiredLocker(userDetails.getUserId());
+
+		List<ReleasedLockerItem> items = result.releasedLockers().stream()
+			.map(info -> new ReleasedLockerItem(info.lockerId(), info.lockerNumber(), info.locationName()))
+			.toList();
+		ExpiredLockerReleaseResponse response = new ExpiredLockerReleaseResponse(result.releasedCount(), items);
+
+		return ApiResponse.success(response);
 	}
 
 	@PostMapping("/{id}/assign")
